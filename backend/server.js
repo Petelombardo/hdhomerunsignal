@@ -176,15 +176,21 @@ class HDHomeRunController {
   }
 
   async getTunerStatus(deviceId, tuner = 0) {
-    return new Promise((resolve, reject) => {
-      exec(`hdhomerun_config ${deviceId} get /tuner${tuner}/status`, (error, stdout) => {
-        if (error) {
+    return new Promise(async (resolve, reject) => {
+      try {
+        // Get both regular status and debug info simultaneously
+        const [statusResult, debugResult] = await Promise.all([
+          this.getStatusCommand(deviceId, tuner, 'status'),
+          this.getStatusCommand(deviceId, tuner, 'debug')
+        ]);
+
+        if (!statusResult) {
           resolve(null);
           return;
         }
 
         const status = {};
-        const statusLine = stdout.trim();
+        const statusLine = statusResult.trim();
         
         if (statusLine === 'none') {
           resolve({ channel: 'none', lock: false });
@@ -212,12 +218,47 @@ class HDHomeRunController {
 
         status.lock = status.lock !== undefined;
         
-        // Get dB values if available
-        this.getSignalDbValues(deviceId, tuner).then(dbValues => {
-          resolve({ ...status, ...dbValues });
-        }).catch(() => {
-          resolve(status);
-        });
+        // Extract dB values from debug output with educated conversion
+        if (debugResult) {
+          const dbgMatch = debugResult.match(/dbg=(\d+)-(\d+)\/(-?\d+)/);
+          if (dbgMatch) {
+            const signalRaw = parseInt(dbgMatch[1]);
+            const snrRaw = parseInt(dbgMatch[2]);
+            
+            // Signal strength: map raw values to realistic ATSC dBm range
+            // Based on observed data: 9-86 raw maps to roughly -80 to -40 dBm
+            let estimatedSignalDbm;
+            if (signalRaw >= 80) estimatedSignalDbm = -40 - (100 - signalRaw) * 0.5;  // Strong: -40 to -50
+            else if (signalRaw >= 60) estimatedSignalDbm = -50 - (80 - signalRaw) * 0.5;   // Good: -50 to -60
+            else if (signalRaw >= 20) estimatedSignalDbm = -60 - (60 - signalRaw) * 0.5;   // Fair: -60 to -80
+            else estimatedSignalDbm = -80 - (20 - signalRaw) * 0.5;                       // Weak: -80+
+            
+            // SNR: more direct conversion (0-80 raw ≈ 0-25 dB)
+            const estimatedSnrDb = snrRaw * 0.31; // Rough linear conversion
+            
+            status.ssDb = Math.round(estimatedSignalDbm * 10) / 10;
+            status.snrDb = snrRaw > 0 ? Math.round(estimatedSnrDb * 10) / 10 : 0;
+            status.debugRaw = `${signalRaw}-${snrRaw}/${dbgMatch[3]}`;
+            
+            console.log(`dB estimate: ${status.ss}% signal = ${signalRaw} raw → ${status.ssDb}dBm, ${status.snq}% SNR = ${snrRaw} raw → ${status.snrDb}dB`);
+          }
+        }
+        
+        resolve(status);
+      } catch (error) {
+        resolve(null);
+      }
+    });
+  }
+
+  async getStatusCommand(deviceId, tuner, command) {
+    return new Promise((resolve) => {
+      exec(`hdhomerun_config ${deviceId} get /tuner${tuner}/${command}`, (error, stdout) => {
+        if (error) {
+          resolve(null);
+        } else {
+          resolve(stdout.trim());
+        }
       });
     });
   }
@@ -248,10 +289,10 @@ class HDHomeRunController {
               const snrRaw = parseInt(dbgMatch[2]);
               const thirdValue = parseInt(dbgMatch[3]);
               
-              // Convert to actual dB values (these may need adjustment based on HDHomeRun docs)
-              // Signal strength typically: raw value - some offset = dBm
-              // SNR typically: raw value = dB
-              dbData.ssDb = signalRaw - 100; // Approximate conversion, may need tuning
+              // Convert to actual dB values 
+              // Different conversion for ATSC 1.0 vs 3.0 - try simpler mapping
+              // For 71% signal, expect around -50 to -60 dBm
+              dbData.ssDb = -100 + (signalRaw * 0.5); // Linear scaling attempt
               dbData.snrDb = snrRaw;
               dbData.debugRaw = `${signalRaw}-${snrRaw}/${thirdValue}`;
               

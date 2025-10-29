@@ -442,14 +442,14 @@ function SignalMeter() {
                     <Box sx={{ flex: '1 1 120px', minWidth: 120 }}>
                       <Typography variant="body2" sx={{ fontSize: '0.75rem', mb: 0.5 }}>
                         Signal: {tunerStatus.ss || 0}%
-                        {tunerStatus.ssDb && <span style={{ fontSize: '0.65rem', opacity: 0.8 }}> ({tunerStatus.ssDb}dBm)</span>}
+                        {tunerStatus.ssDb && <span style={{ fontSize: '0.65rem', opacity: 0.8 }}> (~{tunerStatus.ssDb}dBm)</span>}
                       </Typography>
                       <LinearProgress variant="determinate" value={tunerStatus.ss || 0} sx={{ height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { backgroundColor: getSignalColor(tunerStatus.ss || 0) } }} />
                     </Box>
                     <Box sx={{ flex: '1 1 120px', minWidth: 120 }}>
                       <Typography variant="body2" sx={{ fontSize: '0.75rem', mb: 0.5 }}>
                         SNR: {tunerStatus.snq || 0}%
-                        {tunerStatus.snrDb && <span style={{ fontSize: '0.65rem', opacity: 0.8 }}> ({tunerStatus.snrDb}dB)</span>}
+                        {tunerStatus.snrDb && tunerStatus.snrDb > 0 && <span style={{ fontSize: '0.65rem', opacity: 0.8 }}> (~{tunerStatus.snrDb}dB)</span>}
                       </Typography>
                       <LinearProgress variant="determinate" value={tunerStatus.snq || 0} sx={{ height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { backgroundColor: getSignalColor(tunerStatus.snq || 0) } }} />
                     </Box>
@@ -460,9 +460,6 @@ function SignalMeter() {
                     <Box sx={{ flex: '1 1 100px', minWidth: 100, textAlign: 'right' }}>
                       <Typography variant="body2" sx={{ fontSize: '0.75rem' }}>Rate</Typography>
                       <Typography variant="body1" sx={{ fontSize: '0.9rem', fontWeight: 500 }}>{formatDataRate(tunerStatus.bps)}</Typography>
-                      {tunerStatus.rssi && (
-                        <Typography variant="body2" sx={{ fontSize: '0.65rem', opacity: 0.8 }}>RSSI: {tunerStatus.rssi}</Typography>
-                      )}
                     </Box>
                   </Box>
                 ) : (
