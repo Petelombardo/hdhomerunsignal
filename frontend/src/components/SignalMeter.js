@@ -180,6 +180,7 @@ function SignalMeter() {
   const getDeviceInfo = async (deviceId) => {
     try {
       const response = await axios.get(`/api/devices/${deviceId}/info`);
+      console.log('Device info received:', response.data);
       setDeviceInfo(response.data);
     } catch (error) {
       console.error('Failed to get device info:', error);
@@ -192,6 +193,12 @@ function SignalMeter() {
     if (!selectedDevice || !channel) return;
     
     try {
+      // Clear old data immediately when changing channels
+      setCurrentChannelPrograms([]);
+      setPlpInfo(null);
+      setL1Info(null);
+      setIsAtsc3Channel(false);
+      
       // Use regular tuning - let backend auto-detect ATSC 3.0
       await axios.post(`/api/devices/${selectedDevice}/tuner/${selectedTuner}/channel`, {
         channel
@@ -236,6 +243,12 @@ function SignalMeter() {
   const incrementChannel = async () => {
     if (!selectedDevice) return;
     
+    // Clear old data immediately
+    setCurrentChannelPrograms([]);
+    setPlpInfo(null);
+    setL1Info(null);
+    setIsAtsc3Channel(false);
+    
     // Use the tracked directChannel state or extract from tuner status as fallback
     let currentChannelNum = parseInt(directChannel) || 1;
     
@@ -256,6 +269,12 @@ function SignalMeter() {
 
   const decrementChannel = async () => {
     if (!selectedDevice) return;
+    
+    // Clear old data immediately
+    setCurrentChannelPrograms([]);
+    setPlpInfo(null);
+    setL1Info(null);
+    setIsAtsc3Channel(false);
     
     // Use the tracked directChannel state or extract from tuner status as fallback
     let currentChannelNum = parseInt(directChannel) || 1;
@@ -279,9 +298,14 @@ function SignalMeter() {
     if (!selectedDevice) return;
     
     try {
-      await axios.post(`/api/devices/${selectedDevice}/tuner/${selectedTuner}/clear`);
+      // Clear all data immediately
       setDirectChannel('');
       setCurrentChannelPrograms([]);
+      setPlpInfo(null);
+      setL1Info(null);
+      setIsAtsc3Channel(false);
+      
+      await axios.post(`/api/devices/${selectedDevice}/tuner/${selectedTuner}/clear`);
     } catch (error) {
       console.error('Failed to clear tuner:', error);
     }
@@ -416,11 +440,17 @@ function SignalMeter() {
                 {tunerStatus?.lock ? (
                   <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
                     <Box sx={{ flex: '1 1 120px', minWidth: 120 }}>
-                      <Typography variant="body2" sx={{ fontSize: '0.75rem', mb: 0.5 }}>Signal: {tunerStatus.ss || 0}%</Typography>
+                      <Typography variant="body2" sx={{ fontSize: '0.75rem', mb: 0.5 }}>
+                        Signal: {tunerStatus.ss || 0}%
+                        {tunerStatus.ssDb && <span style={{ fontSize: '0.65rem', opacity: 0.8 }}> ({tunerStatus.ssDb}dBm)</span>}
+                      </Typography>
                       <LinearProgress variant="determinate" value={tunerStatus.ss || 0} sx={{ height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { backgroundColor: getSignalColor(tunerStatus.ss || 0) } }} />
                     </Box>
                     <Box sx={{ flex: '1 1 120px', minWidth: 120 }}>
-                      <Typography variant="body2" sx={{ fontSize: '0.75rem', mb: 0.5 }}>SNR: {tunerStatus.snq || 0}%</Typography>
+                      <Typography variant="body2" sx={{ fontSize: '0.75rem', mb: 0.5 }}>
+                        SNR: {tunerStatus.snq || 0}%
+                        {tunerStatus.snrDb && <span style={{ fontSize: '0.65rem', opacity: 0.8 }}> ({tunerStatus.snrDb}dB)</span>}
+                      </Typography>
                       <LinearProgress variant="determinate" value={tunerStatus.snq || 0} sx={{ height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { backgroundColor: getSignalColor(tunerStatus.snq || 0) } }} />
                     </Box>
                     <Box sx={{ flex: '1 1 120px', minWidth: 120 }}>
@@ -430,6 +460,9 @@ function SignalMeter() {
                     <Box sx={{ flex: '1 1 100px', minWidth: 100, textAlign: 'right' }}>
                       <Typography variant="body2" sx={{ fontSize: '0.75rem' }}>Rate</Typography>
                       <Typography variant="body1" sx={{ fontSize: '0.9rem', fontWeight: 500 }}>{formatDataRate(tunerStatus.bps)}</Typography>
+                      {tunerStatus.rssi && (
+                        <Typography variant="body2" sx={{ fontSize: '0.65rem', opacity: 0.8 }}>RSSI: {tunerStatus.rssi}</Typography>
+                      )}
                     </Box>
                   </Box>
                 ) : (

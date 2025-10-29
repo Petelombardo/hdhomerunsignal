@@ -36,16 +36,24 @@ class HDHomeRunController {
         }
 
         const devices = [];
+        const deviceSet = new Set(); // Track seen device IDs
         const lines = stdout.split('\n').filter(line => line.trim());
         
         lines.forEach(line => {
           const match = line.match(/hdhomerun device ([A-F0-9-]+) found at ([0-9.]+)/);
           if (match) {
-            devices.push({
-              id: match[1],
-              ip: match[2],
-              name: `HDHomeRun ${match[1]}`
-            });
+            const deviceId = match[1];
+            const deviceIp = match[2];
+            
+            // Only add if we haven't seen this device ID before
+            if (!deviceSet.has(deviceId)) {
+              deviceSet.add(deviceId);
+              devices.push({
+                id: deviceId,
+                ip: deviceIp,
+                name: `HDHomeRun ${deviceId}`
+              });
+            }
           }
         });
 
@@ -203,7 +211,81 @@ class HDHomeRunController {
         });
 
         status.lock = status.lock !== undefined;
-        resolve(status);
+        
+        // Get dB values if available
+        this.getSignalDbValues(deviceId, tuner).then(dbValues => {
+          resolve({ ...status, ...dbValues });
+        }).catch(() => {
+          resolve(status);
+        });
+      });
+    });
+  }
+
+  async getSignalDbValues(deviceId, tuner = 0) {
+    return new Promise((resolve, reject) => {
+      // Try to get dB values using various debug commands
+      Promise.all([
+        this.getDbValue(deviceId, tuner, 'debug'),
+        this.getDbValue(deviceId, tuner, 'vstatus'),
+        this.getDbValue(deviceId, tuner, 'streaminfo'),
+        this.getDbValue(deviceId, tuner, 'plotsample')
+      ]).then(results => {
+        console.log(`dB query results for ${deviceId} tuner ${tuner}:`, results);
+        
+        const dbData = {};
+        
+        // Parse results for dB values
+        results.forEach((result, index) => {
+          if (result) {
+            console.log(`Command ${index} output:`, result);
+            
+            // Look for HDHomeRun debug format: dbg=65-19/-1817
+            const dbgMatch = result.match(/dbg=(\d+)-(\d+)\/(-?\d+)/);
+            if (dbgMatch) {
+              // Format appears to be: signal-snr/something
+              const signalRaw = parseInt(dbgMatch[1]);
+              const snrRaw = parseInt(dbgMatch[2]);
+              const thirdValue = parseInt(dbgMatch[3]);
+              
+              // Convert to actual dB values (these may need adjustment based on HDHomeRun docs)
+              // Signal strength typically: raw value - some offset = dBm
+              // SNR typically: raw value = dB
+              dbData.ssDb = signalRaw - 100; // Approximate conversion, may need tuning
+              dbData.snrDb = snrRaw;
+              dbData.debugRaw = `${signalRaw}-${snrRaw}/${thirdValue}`;
+              
+              console.log(`Converted dB values: signal=${signalRaw} -> ${dbData.ssDb}dBm, snr=${snrRaw} -> ${dbData.snrDb}dB`);
+            }
+            
+            // Look for standard dB patterns as fallback
+            const ssDbMatch = result.match(/ss=(-?\d+(?:\.\d+)?)dBm/i);
+            const snrDbMatch = result.match(/snr=(-?\d+(?:\.\d+)?)dB/i);
+            const rssiMatch = result.match(/rssi=(-?\d+(?:\.\d+)?)/i);
+            
+            if (ssDbMatch) dbData.ssDb = parseFloat(ssDbMatch[1]);
+            if (snrDbMatch) dbData.snrDb = parseFloat(snrDbMatch[1]);
+            if (rssiMatch) dbData.rssi = parseFloat(rssiMatch[1]);
+          }
+        });
+        
+        console.log('Parsed dB data:', dbData);
+        resolve(dbData);
+      }).catch((error) => {
+        console.log('dB query error:', error);
+        resolve({});
+      });
+    });
+  }
+
+  async getDbValue(deviceId, tuner, command) {
+    return new Promise((resolve) => {
+      exec(`hdhomerun_config ${deviceId} get /tuner${tuner}/${command}`, (error, stdout) => {
+        if (error) {
+          resolve(null);
+        } else {
+          resolve(stdout.trim());
+        }
       });
     });
   }
