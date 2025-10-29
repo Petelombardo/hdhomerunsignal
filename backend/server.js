@@ -60,15 +60,18 @@ class HDHomeRunController {
       // Get both model and tuner count
       exec(`hdhomerun_config ${deviceId} get /sys/model`, (error, stdout) => {
         if (error) {
-          resolve({ model: 'Unknown', tuners: 2 });
+          resolve({ model: 'Unknown', tuners: 2, atsc3Support: false });
           return;
         }
         
         const model = stdout.trim();
         
+        // ATSC 3.0 support - will be auto-detected based on PLP data availability
+        const atsc3Support = true; // Auto-detect rather than model-based
+        
         // Try to get actual tuner count by checking which tuners exist
         this.getTunerCount(deviceId).then(tunerCount => {
-          resolve({ model, tuners: tunerCount });
+          resolve({ model, tuners: tunerCount, atsc3Support });
         }).catch(() => {
           // Fallback to model-based detection
           let tuners = 2;
@@ -78,7 +81,7 @@ class HDHomeRunController {
           else if (model.includes('FLEX')) tuners = 2;
           else if (model.includes('CONNECT')) tuners = 2;
           
-          resolve({ model, tuners });
+          resolve({ model, tuners, atsc3Support });
         });
       });
     });
@@ -223,59 +226,113 @@ class HDHomeRunController {
     });
   }
 
-  async getCurrentChannelPrograms(deviceId, tuner = 0) {
-    return new Promise((resolve, reject) => {
-      exec(`hdhomerun_config ${deviceId} get /tuner${tuner}/streaminfo`, (error, stdout) => {
-        if (error) {
-          resolve([]);
-          return;
-        }
+  async getCurrentChannelPrograms(deviceId, tuner = 0, maxRetries = 3) {
+    return new Promise(async (resolve, reject) => {
+      // First check if tuner is locked
+      const status = await this.getTunerStatus(deviceId, tuner);
+      if (!status || !status.lock || status.channel === 'none') {
+        resolve([]);
+        return;
+      }
 
-        const programs = [];
-        const lines = stdout.split('\n').filter(line => line.trim());
-        
-        lines.forEach(line => {
-          // Parse streaminfo output for program information
-          // Format: tsid=0x0001 program=1: 12.1 WHYY (encrypted)
-          const programMatch = line.match(/program=(\d+):\s*([\d.]+)\s+(.+?)(?:\s+\(([^)]+)\))?$/);
-          if (programMatch) {
-            const programNum = programMatch[1];
-            const virtualChannel = programMatch[2];
-            const name = programMatch[3].trim();
-            const status = programMatch[4] || '';
-            
-            programs.push({
-              programNum,
-              virtualChannel,
-              name,
-              callsign: name,
-              status,
-              encrypted: status.includes('encrypted')
-            });
-          } else {
-            // Try alternative format parsing for different output formats
-            const altMatch = line.match(/(\d+):\s*([\d.]+)\s+(.+)/);
-            if (altMatch) {
-              programs.push({
-                programNum: altMatch[1],
-                virtualChannel: altMatch[2],
-                name: altMatch[3].trim(),
-                callsign: altMatch[3].trim(),
-                status: '',
-                encrypted: false
-              });
+      let attempt = 0;
+      const tryGetPrograms = () => {
+        exec(`hdhomerun_config ${deviceId} get /tuner${tuner}/streaminfo`, (error, stdout) => {
+          if (error) {
+            if (attempt < maxRetries) {
+              attempt++;
+              setTimeout(tryGetPrograms, 1500); // Wait 1.5s between retries
+              return;
             }
+            resolve([]);
+            return;
           }
-        });
 
-        resolve(programs);
-      });
+          const programs = [];
+          const lines = stdout.split('\n').filter(line => line.trim());
+          
+          lines.forEach(line => {
+            // Enhanced parsing for both ATSC 1.0 and 3.0 formats
+            // ATSC 1.0: tsid=0x0001 program=1: 12.1 WHYY (encrypted)
+            // ATSC 3.0: service=1: 12.1 WHYY (atsc3) or program=1: 12.1 WHYY
+            const programMatch = line.match(/(?:program|service)=(\d+):\s*([\d.]+)\s+(.+?)(?:\s+\(([^)]+)\))?$/);
+            if (programMatch) {
+              const programNum = programMatch[1];
+              const virtualChannel = programMatch[2];
+              const name = programMatch[3].trim();
+              const status = programMatch[4] || '';
+              
+              programs.push({
+                programNum,
+                virtualChannel,
+                name,
+                callsign: name,
+                status,
+                encrypted: status.includes('encrypted'),
+                atsc3: status.includes('atsc3')
+              });
+            } else {
+              // Try alternative format parsing
+              const altMatch = line.match(/(\d+):\s*([\d.]+)\s+(.+?)(?:\s+\(([^)]+)\))?$/);
+              if (altMatch) {
+                programs.push({
+                  programNum: altMatch[1],
+                  virtualChannel: altMatch[2],
+                  name: altMatch[3].trim(),
+                  callsign: altMatch[3].trim(),
+                  status: altMatch[4] || '',
+                  encrypted: (altMatch[4] || '').includes('encrypted'),
+                  atsc3: (altMatch[4] || '').includes('atsc3')
+                });
+              }
+            }
+          });
+
+          // If no programs found and we have retries left, try again
+          if (programs.length === 0 && attempt < maxRetries) {
+            attempt++;
+            setTimeout(tryGetPrograms, 2000); // Wait longer for ATSC 3.0
+            return;
+          }
+
+          resolve(programs);
+        });
+      };
+
+      tryGetPrograms();
     });
   }
 
   async setChannel(deviceId, tuner, channel) {
     return new Promise((resolve, reject) => {
-      exec(`hdhomerun_config ${deviceId} set /tuner${tuner}/channel ${channel}`, (error, stdout) => {
+      // Handle ATSC 3.0 format: atsc3:27:0+1+2 or regular format: 27
+      let command;
+      if (channel.includes('atsc3:')) {
+        command = `hdhomerun_config ${deviceId} set /tuner${tuner}/channel ${channel}`;
+      } else {
+        // For regular channels, check if we should use ATSC 3.0 format
+        // This could be enhanced to auto-detect based on device capabilities
+        command = `hdhomerun_config ${deviceId} set /tuner${tuner}/channel ${channel}`;
+      }
+      
+      exec(command, (error, stdout) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve(stdout.trim());
+      });
+    });
+  }
+
+  async setAtsc3Channel(deviceId, tuner, channel, plps = []) {
+    return new Promise((resolve, reject) => {
+      let channelStr = `atsc3:${channel}`;
+      if (plps.length > 0) {
+        channelStr += `:${plps.join('+')}`;
+      }
+      
+      exec(`hdhomerun_config ${deviceId} set /tuner${tuner}/channel ${channelStr}`, (error, stdout) => {
         if (error) {
           reject(error);
           return;
@@ -321,6 +378,80 @@ class HDHomeRunController {
     });
   }
 
+  async getPlpInfo(deviceId, tuner = 0) {
+    return new Promise((resolve, reject) => {
+      exec(`hdhomerun_config ${deviceId} get /tuner${tuner}/plpinfo`, (error, stdout) => {
+        console.log(`PLP Info for ${deviceId} tuner ${tuner}:`, error ? 'ERROR: ' + error.message : stdout);
+        
+        if (error) {
+          resolve(null);
+          return;
+        }
+
+        const plpData = {};
+        const lines = stdout.split('\n').filter(line => line.trim());
+        
+        lines.forEach(line => {
+          // Parse PLP info output
+          // Actual format: "0: sfi=0 mod=qam256 cod=10/15 layer=core ti=cti lls=1 lock=1"
+          const plpMatch = line.match(/^(\d+):/);
+          if (plpMatch) {
+            const plpId = plpMatch[1];
+            plpData[plpId] = {};
+            
+            // Extract all key=value pairs
+            const sfiMatch = line.match(/sfi=(\w+)/);
+            const modMatch = line.match(/mod=(\w+)/);
+            const codMatch = line.match(/cod=([0-9/]+)/);
+            const layerMatch = line.match(/layer=(\w+)/);
+            const tiMatch = line.match(/ti=(\w+)/);
+            const llsMatch = line.match(/lls=(\d+)/);
+            const lockMatch = line.match(/lock=(\d+)/);
+            
+            if (sfiMatch) plpData[plpId].sfi = sfiMatch[1];
+            if (modMatch) plpData[plpId].modulation = modMatch[1];
+            if (codMatch) plpData[plpId].coderate = codMatch[1];
+            if (layerMatch) plpData[plpId].layer = layerMatch[1];
+            if (tiMatch) plpData[plpId].timeInterleaving = tiMatch[1];
+            if (llsMatch) plpData[plpId].lls = llsMatch[1] === '1';
+            if (lockMatch) plpData[plpId].lock = lockMatch[1] === '1';
+          }
+        });
+
+        console.log('Parsed PLP data:', plpData);
+        resolve(Object.keys(plpData).length > 0 ? plpData : null);
+      });
+    });
+  }
+
+  async getL1Info(deviceId, tuner = 0) {
+    return new Promise((resolve, reject) => {
+      exec(`hdhomerun_config ${deviceId} get /tuner${tuner}/l1info`, (error, stdout) => {
+        if (error) {
+          resolve(null);
+          return;
+        }
+
+        const l1Data = {};
+        const lines = stdout.split('\n').filter(line => line.trim());
+        
+        lines.forEach(line => {
+          // Parse L1 info output
+          // Format examples: l1_basic_mode=1 l1_detail_mode=2 fft_size=8192
+          const keyValueMatch = line.match(/(\w+)=([^\s]+)/g);
+          if (keyValueMatch) {
+            keyValueMatch.forEach(match => {
+              const [key, value] = match.split('=');
+              l1Data[key] = value;
+            });
+          }
+        });
+
+        resolve(Object.keys(l1Data).length > 0 ? l1Data : null);
+      });
+    });
+  }
+
   startMonitoring(socket, deviceId, tuner) {
     this.stopMonitoring();
     
@@ -329,9 +460,20 @@ class HDHomeRunController {
         const status = await this.getTunerStatus(deviceId, tuner);
         const currentProgram = await this.getCurrentProgram(deviceId, tuner);
         
+        // Get ATSC 3.0 info if channel is tuned and device supports it
+        let plpInfo = null;
+        let l1Info = null;
+        if (status && status.channel && status.channel !== 'none') {
+          // Try to get ATSC 3.0 info - will return null if not ATSC 3.0
+          plpInfo = await this.getPlpInfo(deviceId, tuner);
+          l1Info = await this.getL1Info(deviceId, tuner);
+        }
+        
         socket.emit('tuner-status', {
           ...status,
-          currentProgram
+          currentProgram,
+          plpInfo,
+          l1Info
         });
       } catch (error) {
         console.error('Monitoring error:', error);
@@ -434,6 +576,37 @@ app.post('/api/devices/:id/tuner/:tuner/clear', async (req, res) => {
   try {
     const { id, tuner } = req.params;
     const result = await hdhrController.clearTuner(id, tuner);
+    res.json({ success: true, result });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/devices/:id/tuner/:tuner/plpinfo', async (req, res) => {
+  try {
+    const { id, tuner } = req.params;
+    const plpInfo = await hdhrController.getPlpInfo(id, tuner);
+    res.json(plpInfo);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/devices/:id/tuner/:tuner/l1info', async (req, res) => {
+  try {
+    const { id, tuner } = req.params;
+    const l1Info = await hdhrController.getL1Info(id, tuner);
+    res.json(l1Info);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/devices/:id/tuner/:tuner/atsc3', async (req, res) => {
+  try {
+    const { id, tuner } = req.params;
+    const { channel, plps } = req.body;
+    const result = await hdhrController.setAtsc3Channel(id, tuner, channel, plps);
     res.json({ success: true, result });
   } catch (error) {
     res.status(500).json({ error: error.message });

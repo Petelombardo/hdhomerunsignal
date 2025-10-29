@@ -73,6 +73,9 @@ function SignalMeter() {
   const [currentChannelPrograms, setCurrentChannelPrograms] = useState([]);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [showInstallButton, setShowInstallButton] = useState(false);
+  const [plpInfo, setPlpInfo] = useState(null);
+  const [l1Info, setL1Info] = useState(null);
+  const [isAtsc3Channel, setIsAtsc3Channel] = useState(false);
 
   useEffect(() => {
     discoverDevices();
@@ -81,6 +84,22 @@ function SignalMeter() {
 
     newSocket.on('tuner-status', (status) => {
       setTunerStatus(status);
+      
+      // Auto-detect ATSC 3.0 based on presence of PLP data
+      const hasAtsc3Data = status.plpInfo && Object.keys(status.plpInfo).length > 0;
+      setIsAtsc3Channel(hasAtsc3Data);
+      
+      if (status.plpInfo) {
+        setPlpInfo(status.plpInfo);
+      } else {
+        setPlpInfo(null);
+      }
+      
+      if (status.l1Info) {
+        setL1Info(status.l1Info);
+      } else {
+        setL1Info(null);
+      }
     });
 
     // PWA install prompt handling
@@ -173,15 +192,30 @@ function SignalMeter() {
     if (!selectedDevice || !channel) return;
     
     try {
+      // Use regular tuning - let backend auto-detect ATSC 3.0
       await axios.post(`/api/devices/${selectedDevice}/tuner/${selectedTuner}/channel`, {
         channel
       });
+      
       setSelectedChannel(channel);
       setDirectChannel('');
-      // Wait a bit for the tuner to lock, then get programs
-      setTimeout(async () => {
+      
+      // Wait for tuner to lock with progressive delays
+      const waitAndGetPrograms = async () => {
+        // Initial wait
+        await new Promise(resolve => setTimeout(resolve, 2000));
         await getCurrentChannelPrograms();
-      }, 2000);
+        
+        // Try again after longer delay for slow-locking channels
+        setTimeout(async () => {
+          const response = await axios.get(`/api/devices/${selectedDevice}/tuner/${selectedTuner}/programs`);
+          if (response.data.length > currentChannelPrograms.length) {
+            setCurrentChannelPrograms(response.data);
+          }
+        }, 4000);
+      };
+      
+      waitAndGetPrograms();
     } catch (error) {
       console.error('Failed to set channel:', error);
     }
@@ -445,6 +479,116 @@ function SignalMeter() {
                       </Select>
                     </FormControl>
                   )}
+                </Box>
+              </CardContent>
+            </Card>
+          </Grid>
+        )}
+
+        {/* ATSC 3.0 Status Indicator */}
+        {selectedDevice && isAtsc3Channel && (
+          <Grid item xs={12}>
+            <Card>
+              <CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}>
+                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                  <Chip 
+                    label="ATSC 3.0 Channel Detected" 
+                    color="success" 
+                    variant="outlined"
+                    size="small"
+                    sx={{ fontWeight: 600 }}
+                  />
+                  <Typography variant="body2" sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>
+                    NextGen TV signal with enhanced data available
+                  </Typography>
+                </Box>
+              </CardContent>
+            </Card>
+          </Grid>
+        )}
+
+        {/* PLP Information */}
+        {selectedDevice && plpInfo && (
+          <Grid item xs={12}>
+            <Card>
+              <CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}>
+                <Typography variant="body1" sx={{ fontSize: '0.9rem', mb: 1, fontWeight: 500 }}>
+                  ATSC 3.0 PLP Information
+                </Typography>
+                <TableContainer component={Paper} sx={{ backgroundColor: 'transparent', boxShadow: 'none' }}>
+                  <Table size="small" sx={{ '& .MuiTableCell-root': { py: 0.5, fontSize: '0.8rem' } }}>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell sx={{ fontWeight: 600 }}>PLP</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>Modulation</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>Code Rate</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>Layer</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>Time Interleaving</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>LLS</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>Lock</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {Object.entries(plpInfo).map(([plpId, info]) => (
+                        <TableRow key={plpId}>
+                          <TableCell>
+                            <Chip 
+                              label={plpId} 
+                              size="small" 
+                              color="primary" 
+                              variant="outlined"
+                              sx={{ height: 20, fontSize: '0.7rem' }}
+                            />
+                          </TableCell>
+                          <TableCell>{info.modulation || 'N/A'}</TableCell>
+                          <TableCell>{info.coderate || 'N/A'}</TableCell>
+                          <TableCell>{info.layer || 'N/A'}</TableCell>
+                          <TableCell>{info.timeInterleaving || 'N/A'}</TableCell>
+                          <TableCell>
+                            <Chip 
+                              label={info.lls ? 'Yes' : 'No'} 
+                              size="small" 
+                              color={info.lls ? 'success' : 'default'}
+                              sx={{ height: 18, fontSize: '0.65rem' }}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Chip 
+                              label={info.lock ? 'Locked' : 'Unlocked'} 
+                              size="small" 
+                              color={info.lock ? 'success' : 'error'}
+                              sx={{ height: 18, fontSize: '0.65rem' }}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </CardContent>
+            </Card>
+          </Grid>
+        )}
+
+        {/* L1 Information */}
+        {selectedDevice && l1Info && (
+          <Grid item xs={12}>
+            <Card>
+              <CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}>
+                <Typography variant="body1" sx={{ fontSize: '0.9rem', mb: 1, fontWeight: 500 }}>
+                  ATSC 3.0 L1 Information
+                </Typography>
+                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 1 }}>
+                  {Object.entries(l1Info).map(([key, value]) => (
+                    <Box key={key} sx={{ display: 'flex', justifyContent: 'space-between', p: 0.5, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 1 }}>
+                      <Typography variant="body2" sx={{ fontSize: '0.75rem', fontWeight: 500 }}>
+                        {key.replace(/_/g, ' ').toUpperCase()}:
+                      </Typography>
+                      <Typography variant="body2" sx={{ fontSize: '0.75rem' }}>
+                        {value}
+                      </Typography>
+                    </Box>
+                  ))}
                 </Box>
               </CardContent>
             </Card>

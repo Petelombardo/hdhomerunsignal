@@ -12,6 +12,8 @@ A modern web application that replaces the discontinued HDHomeRun Signal Android
 - **Modern UI**: Clean, dark theme interface with Material-UI components
 
 ## Screenshots Reference
+<img src="blob:chrome-untrusted://media-app/b59358a3-37ea-41c3-99ce-9f0b53db6d92" alt="Screenshot_20251028-142919.webp"/><img width="864" height="1939" alt="image" src="https://github.com/user-attachments/assets/3a35fb89-b382-4069-895c-d12328ab2215" />
+
 
 The original Android app functionality has been recreated with:
 - Device selection dropdown (replaces device dropdown from original)
@@ -44,7 +46,7 @@ The original Android app functionality has been recreated with:
 1. **Device Selection**: Choose your HDHomeRun device from the dropdown
 2. **Channel Map**: Select the appropriate channel map (US Broadcast is default)
 3. **Tuner Selection**: Use the arrow buttons to switch between tuners
-4. **Channel Scanning**: Click "Scan" to find available channels
+4. **Channel Selection**: Enter the channel you want to tune to and press the tuner icon or hit enter
 5. **Monitor Signal**: View real-time signal strength, SNR, and symbol quality
 
 ## Configuration
