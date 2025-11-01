@@ -17,6 +17,7 @@ dist/
 .env.development.local
 .env.test.local
 .env.production.local
+,gitignore
 
 # Logs
 *.log
@@ -99,3 +100,5 @@ temp/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+deploy-to-prod

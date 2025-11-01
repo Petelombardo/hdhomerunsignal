@@ -77,29 +77,94 @@ function SignalMeter() {
   const [l1Info, setL1Info] = useState(null);
   const [isAtsc3Channel, setIsAtsc3Channel] = useState(false);
 
+  // Refs to track current device/tuner for reconnection
+  const selectedDeviceRef = React.useRef(selectedDevice);
+  const selectedTunerRef = React.useRef(selectedTuner);
+
+  // Keep refs in sync with state
+  React.useEffect(() => {
+    selectedDeviceRef.current = selectedDevice;
+  }, [selectedDevice]);
+
+  React.useEffect(() => {
+    selectedTunerRef.current = selectedTuner;
+  }, [selectedTuner]);
+
   useEffect(() => {
     discoverDevices();
-    const newSocket = io();
+    const newSocket = io({
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      timeout: 20000
+    });
     setSocket(newSocket);
 
     newSocket.on('tuner-status', (status) => {
       setTunerStatus(status);
-      
+
       // Auto-detect ATSC 3.0 based on presence of PLP data
       const hasAtsc3Data = status.plpInfo && Object.keys(status.plpInfo).length > 0;
       setIsAtsc3Channel(hasAtsc3Data);
-      
+
       if (status.plpInfo) {
         setPlpInfo(status.plpInfo);
       } else {
         setPlpInfo(null);
       }
-      
+
       if (status.l1Info) {
         setL1Info(status.l1Info);
       } else {
         setL1Info(null);
       }
+    });
+
+    // Handle socket connection/reconnection
+    let hasConnectedOnce = false;
+
+    newSocket.on('connect', () => {
+      if (hasConnectedOnce) {
+        console.log('Socket reconnected - restarting monitoring');
+        // On reconnect, restart monitoring if we have a device selected
+        if (selectedDeviceRef.current) {
+          // Add small delay to ensure socket is fully ready
+          setTimeout(() => {
+            console.log('Emitting start-monitoring for device:', selectedDeviceRef.current, 'tuner:', selectedTunerRef.current);
+            newSocket.emit('start-monitoring', {
+              deviceId: selectedDeviceRef.current,
+              tuner: selectedTunerRef.current
+            });
+          }, 100);
+        } else {
+          console.log('No device selected, skipping monitoring restart');
+        }
+      } else {
+        console.log('Socket connected (initial)');
+        hasConnectedOnce = true;
+        // Don't start monitoring here - let the useEffect handle it
+      }
+    });
+
+    newSocket.on('disconnect', (reason) => {
+      console.log('Socket disconnected:', reason);
+    });
+
+    newSocket.on('connect_error', (error) => {
+      console.log('Socket connection error:', error.message);
+    });
+
+    newSocket.on('reconnect_attempt', (attemptNumber) => {
+      console.log('Reconnection attempt:', attemptNumber);
+    });
+
+    newSocket.on('reconnect_error', (error) => {
+      console.log('Reconnection error:', error.message);
+    });
+
+    newSocket.on('reconnect_failed', () => {
+      console.log('Reconnection failed - gave up');
     });
 
     // PWA install prompt handling
@@ -133,13 +198,15 @@ function SignalMeter() {
 
   useEffect(() => {
     if (selectedDevice && socket) {
-      socket.emit('start-monitoring', { 
-        deviceId: selectedDevice, 
-        tuner: selectedTuner 
+      console.log('useEffect: Starting monitoring for device:', selectedDevice, 'tuner:', selectedTuner);
+      socket.emit('start-monitoring', {
+        deviceId: selectedDevice,
+        tuner: selectedTuner
       });
     }
     return () => {
       if (socket) {
+        console.log('useEffect cleanup: Stopping monitoring');
         socket.emit('stop-monitoring');
       }
     };
@@ -162,6 +229,18 @@ function SignalMeter() {
     }
   }, [tunerStatus?.channel]);
 
+  // Auto-fetch programs when channel is already tuned on initial load
+  useEffect(() => {
+    if (tunerStatus?.lock &&
+        tunerStatus.channel &&
+        tunerStatus.channel !== 'none' &&
+        currentChannelPrograms.length === 0 &&
+        selectedDevice) {
+      // Channel is tuned but we don't have program info yet - fetch it
+      getCurrentChannelPrograms();
+    }
+  }, [tunerStatus?.lock, tunerStatus?.channel, selectedDevice]);
+
   const discoverDevices = async () => {
     setLoading(true);
     try {
@@ -182,8 +261,10 @@ function SignalMeter() {
       const response = await axios.get(`/api/devices/${deviceId}/info`);
       console.log('Device info received:', response.data);
       setDeviceInfo(response.data);
+      return response.data;
     } catch (error) {
       console.error('Failed to get device info:', error);
+      return null;
     }
   };
 
@@ -191,28 +272,28 @@ function SignalMeter() {
 
   const tuneToDirectChannel = async (channel) => {
     if (!selectedDevice || !channel) return;
-    
+
     try {
       // Clear old data immediately when changing channels
       setCurrentChannelPrograms([]);
       setPlpInfo(null);
       setL1Info(null);
       setIsAtsc3Channel(false);
-      
+
       // Use regular tuning - let backend auto-detect ATSC 3.0
       await axios.post(`/api/devices/${selectedDevice}/tuner/${selectedTuner}/channel`, {
         channel
       });
-      
+
       setSelectedChannel(channel);
-      setDirectChannel('');
-      
+      // Don't clear directChannel - it will be updated by the useEffect when tuner status updates
+
       // Wait for tuner to lock with progressive delays
       const waitAndGetPrograms = async () => {
         // Initial wait
         await new Promise(resolve => setTimeout(resolve, 2000));
         await getCurrentChannelPrograms();
-        
+
         // Try again after longer delay for slow-locking channels
         setTimeout(async () => {
           const response = await axios.get(`/api/devices/${selectedDevice}/tuner/${selectedTuner}/programs`);
@@ -221,7 +302,7 @@ function SignalMeter() {
           }
         }, 4000);
       };
-      
+
       waitAndGetPrograms();
     } catch (error) {
       console.error('Failed to set channel:', error);
@@ -346,8 +427,22 @@ function SignalMeter() {
                     value={selectedDevice}
                     label="Device"
                     onChange={async (e) => {
-                      setSelectedDevice(e.target.value);
-                      await getDeviceInfo(e.target.value);
+                      const newDeviceId = e.target.value;
+                      setSelectedDevice(newDeviceId);
+
+                      // Clear old channel data when switching devices
+                      setCurrentChannelPrograms([]);
+                      setPlpInfo(null);
+                      setL1Info(null);
+                      setIsAtsc3Channel(false);
+                      setDirectChannel('');
+
+                      // Get info for new device and adjust tuner if needed
+                      const info = await getDeviceInfo(newDeviceId);
+                      if (info && selectedTuner >= info.tuners) {
+                        // Current tuner doesn't exist on new device - switch to highest tuner
+                        setSelectedTuner(info.tuners - 1);
+                      }
                     }}
                   >
                     {devices.map((device) => (
