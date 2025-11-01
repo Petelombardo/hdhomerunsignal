@@ -59,6 +59,46 @@ const CHANNEL_MAPS = [
   { value: 'us-irc', label: 'US IRC' }
 ];
 
+// Convert frequency (in Hz) to broadcast channel number
+function frequencyToChannel(freqHz) {
+  const freqMhz = freqHz / 1000000;
+
+  // VHF Low (channels 2-6): 54-88 MHz
+  if (freqMhz >= 54 && freqMhz <= 88) {
+    // Channel 2: 57 MHz center, Channel 3: 63, Channel 4: 69, Channel 5: 79, Channel 6: 85
+    const vhfLowChannels = [
+      { ch: 2, freq: 57 }, { ch: 3, freq: 63 }, { ch: 4, freq: 69 },
+      { ch: 5, freq: 79 }, { ch: 6, freq: 85 }
+    ];
+    let closest = vhfLowChannels[0];
+    let minDiff = Math.abs(freqMhz - closest.freq);
+    for (const ch of vhfLowChannels) {
+      const diff = Math.abs(freqMhz - ch.freq);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closest = ch;
+      }
+    }
+    return closest.ch;
+  }
+
+  // VHF High (channels 7-13): 174-216 MHz
+  if (freqMhz >= 174 && freqMhz <= 216) {
+    // Channel 7: 177 MHz center, then +6 MHz for each channel
+    const channel = Math.round((freqMhz - 177) / 6) + 7;
+    return Math.max(7, Math.min(13, channel));
+  }
+
+  // UHF (channels 14-36): 470-608 MHz (post-repack)
+  if (freqMhz >= 470 && freqMhz <= 608) {
+    // Channel 14: 473 MHz center, then +6 MHz for each channel
+    const channel = Math.round((freqMhz - 473) / 6) + 14;
+    return Math.max(14, Math.min(36, channel));
+  }
+
+  return null; // Unknown frequency range
+}
+
 function SignalMeter() {
   const [devices, setDevices] = useState([]);
   const [selectedDevice, setSelectedDevice] = useState('');
@@ -220,16 +260,28 @@ function SignalMeter() {
         setDirectChannel('');
         setCurrentChannelPrograms([]);
       } else {
-        // Extract broadcast channel from status (e.g., "auto:4" -> "4", "13" -> "13")
-        const channelMatch = tunerStatus.channel.match(/(?:auto:)?(\d+)/);
-        if (channelMatch) {
-          setDirectChannel(channelMatch[1]);
+        // Check if format includes frequency (e.g., "auto6t:605028615")
+        const freqMatch = tunerStatus.channel.match(/:(\d{8,})/);
+        if (freqMatch) {
+          // Has frequency - convert to channel number
+          const freqHz = parseInt(freqMatch[1]);
+          const channel = frequencyToChannel(freqHz);
+          if (channel) {
+            console.log(`Converted frequency ${freqHz} Hz to channel ${channel}`);
+            setDirectChannel(channel.toString());
+          }
+        } else {
+          // Standard format (e.g., "auto:4" -> "4", "13" -> "13")
+          const channelMatch = tunerStatus.channel.match(/(?:auto:)?(\d+)/);
+          if (channelMatch) {
+            setDirectChannel(channelMatch[1]);
+          }
         }
       }
     }
   }, [tunerStatus?.channel]);
 
-  // Auto-fetch programs when channel is already tuned on initial load
+  // Auto-fetch programs when channel is already tuned on initial load or after tuner change
   useEffect(() => {
     if (tunerStatus?.lock &&
         tunerStatus.channel &&
@@ -237,9 +289,22 @@ function SignalMeter() {
         currentChannelPrograms.length === 0 &&
         selectedDevice) {
       // Channel is tuned but we don't have program info yet - fetch it
+      console.log('Auto-fetching programs for tuner', selectedTuner);
       getCurrentChannelPrograms();
     }
-  }, [tunerStatus?.lock, tunerStatus?.channel, selectedDevice]);
+  }, [tunerStatus?.lock, tunerStatus?.channel, selectedDevice, selectedTuner]);
+
+  // Clear all data when tuner changes
+  useEffect(() => {
+    console.log('Tuner changed to:', selectedTuner, '- clearing old channel data');
+    setCurrentChannelPrograms([]);
+    setPlpInfo(null);
+    setL1Info(null);
+    setIsAtsc3Channel(false);
+    setDirectChannel('');
+    // Note: monitoring will restart via the monitoring useEffect, and
+    // the auto-fetch useEffect will repopulate data for the new tuner
+  }, [selectedTuner]);
 
   const discoverDevices = async () => {
     setLoading(true);
@@ -323,24 +388,31 @@ function SignalMeter() {
 
   const incrementChannel = async () => {
     if (!selectedDevice) return;
-    
+
     // Clear old data immediately
     setCurrentChannelPrograms([]);
     setPlpInfo(null);
     setL1Info(null);
     setIsAtsc3Channel(false);
-    
+
     // Use the tracked directChannel state or extract from tuner status as fallback
     let currentChannelNum = parseInt(directChannel) || 1;
-    
+
     // If directChannel is empty or invalid, try to extract from tuner status
     if (!currentChannelNum && tunerStatus?.channel) {
-      const channelMatch = tunerStatus.channel.match(/(?:auto:)?(\d+)/);
-      currentChannelNum = channelMatch ? parseInt(channelMatch[1]) : 1;
+      // Check for frequency format first
+      const freqMatch = tunerStatus.channel.match(/:(\d{8,})/);
+      if (freqMatch) {
+        const freqHz = parseInt(freqMatch[1]);
+        currentChannelNum = frequencyToChannel(freqHz) || 1;
+      } else {
+        const channelMatch = tunerStatus.channel.match(/(?:auto:)?(\d+)/);
+        currentChannelNum = channelMatch ? parseInt(channelMatch[1]) : 1;
+      }
     }
-    
+
     const nextChannel = Math.min(36, currentChannelNum + 1);
-    
+
     try {
       await tuneToDirectChannel(nextChannel.toString());
     } catch (error) {
@@ -350,24 +422,31 @@ function SignalMeter() {
 
   const decrementChannel = async () => {
     if (!selectedDevice) return;
-    
+
     // Clear old data immediately
     setCurrentChannelPrograms([]);
     setPlpInfo(null);
     setL1Info(null);
     setIsAtsc3Channel(false);
-    
+
     // Use the tracked directChannel state or extract from tuner status as fallback
     let currentChannelNum = parseInt(directChannel) || 1;
-    
+
     // If directChannel is empty or invalid, try to extract from tuner status
     if (!currentChannelNum && tunerStatus?.channel) {
-      const channelMatch = tunerStatus.channel.match(/(?:auto:)?(\d+)/);
-      currentChannelNum = channelMatch ? parseInt(channelMatch[1]) : 1;
+      // Check for frequency format first
+      const freqMatch = tunerStatus.channel.match(/:(\d{8,})/);
+      if (freqMatch) {
+        const freqHz = parseInt(freqMatch[1]);
+        currentChannelNum = frequencyToChannel(freqHz) || 1;
+      } else {
+        const channelMatch = tunerStatus.channel.match(/(?:auto:)?(\d+)/);
+        currentChannelNum = channelMatch ? parseInt(channelMatch[1]) : 1;
+      }
     }
-    
+
     const prevChannel = Math.max(1, currentChannelNum - 1);
-    
+
     try {
       await tuneToDirectChannel(prevChannel.toString());
     } catch (error) {
