@@ -15,8 +15,11 @@ A modern web application that replaces the discontinued HDHomeRun Signal Android
 - **Modern UI**: Clean, dark theme interface with Material-UI components
 
 ## Screenshots Reference
+Main Mode
 <img src="blob:chrome-untrusted://media-app/f33b07c7-47ab-4f8b-b132-f065949c5bfb" alt="screenshot-hdhrsignal.png"/><img width="742" height="1285" alt="image" src="https://github.com/user-attachments/assets/2de59b75-0c89-43b9-991a-4b24bde06a9f" />
 
+Antenna Mode
+<img width="1084" height="1252" alt="image" src="https://github.com/user-attachments/assets/1fab4b4e-dc43-428c-9367-4324bb79d8df" />
 
 
 The original Android app functionality has been recreated with:
