@@ -6,6 +6,7 @@ A modern web application that replaces the discontinued HDHomeRun Signal Android
 
 - **Device Discovery**: Automatically finds HDHomeRun devices on your network
 - **Real-time Signal Monitoring**: Live updates of signal strength, SNR quality, and symbol quality with dBm/dB estimates
+- **Antenna Tuning Mode**: Monitor all tuners simultaneously with real-time graphs for optimal antenna positioning
 - **Direct Channel Tuning**: Quickly tune to specific channels with channel up/down controls
 - **Multi-tuner Support**: Switch between tuners on devices that support multiple tuners
 - **ATSC 3.0 Support**: Displays PLP and L1 information for NextGen TV broadcasts
@@ -22,14 +23,16 @@ Antenna Mode
 <img width="1084" height="1252" alt="image" src="https://github.com/user-attachments/assets/1fab4b4e-dc43-428c-9367-4324bb79d8df" />
 
 
-The original Android app functionality has been recreated with:
+The original Android app functionality has been recreated and enhanced with:
 - Device selection dropdown
 - Real-time signal strength, SNR quality, and symbol quality meters with dB conversion
+- **Antenna tuning mode** - simultaneous monitoring of all tuners with real-time graphing (new!)
 - Direct channel tuning with up/down controls
 - Channel map selection (us-bcast, us-cable, us-hrc, us-irc)
 - Data rate monitoring
 - Program/PID listing for tuned channels
 - ATSC 3.0 advanced information display
+- Automatic reconnection after network interruptions
 
 ## Prerequisites
 
@@ -67,6 +70,8 @@ The Docker image will automatically select the correct architecture for your pla
 
 ## Usage
 
+### Normal Mode
+
 1. **Device Selection**: Choose your HDHomeRun device from the dropdown
 2. **Tuner Selection**: Select which tuner to monitor/control
 3. **Channel Tuning**:
@@ -76,6 +81,25 @@ The Docker image will automatically select the correct architecture for your pla
 4. **Monitor Signal**: View real-time signal strength (dBm), SNR (dB), and symbol quality
 5. **View Programs**: See detected programs/PIDs and ATSC 3.0 technical details when available
 6. **Channel Map**: Select the appropriate channel map (US Broadcast is default)
+
+### Antenna Tuning Mode
+
+Perfect for aligning your antenna for optimal signal reception:
+
+1. **Activate**: Click the satellite icon button next to the device selector
+2. **View All Tuners**: See real-time signal data from all tuners simultaneously in a grid layout
+3. **Monitor Symbol Quality**: Each tuner shows a color-coded badge:
+   - **Green** (100%): Perfect signal lock - antenna is properly aligned
+   - **Red** (<100%): Signal present but poor - keep adjusting
+   - **Gray** (0%): No signal detected
+4. **Watch the Graphs**: Side-by-side real-time graphs show:
+   - **Signal Strength** (left): Overall signal power over last 60 seconds
+   - **SNR Quality** (right): Signal-to-noise ratio over last 60 seconds
+5. **Optimize Your Antenna**:
+   - Prioritize getting Symbol Quality to 100% (green) on all tuned channels
+   - Then maximize SNR quality for better reception in varying conditions
+   - Signal strength helps with initial rough positioning
+6. **Return to Normal Mode**: Click the satellite icon again
 
 ## Configuration
 
