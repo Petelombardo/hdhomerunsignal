@@ -577,12 +577,12 @@ class HDHomeRunController {
 
   startMonitoring(socket, deviceId, tuner) {
     this.stopMonitoring();
-    
+
     this.monitoringInterval = setInterval(async () => {
       try {
         const status = await this.getTunerStatus(deviceId, tuner);
         const currentProgram = await this.getCurrentProgram(deviceId, tuner);
-        
+
         // Get ATSC 3.0 info if channel is tuned and device supports it
         let plpInfo = null;
         let l1Info = null;
@@ -591,7 +591,7 @@ class HDHomeRunController {
           plpInfo = await this.getPlpInfo(deviceId, tuner);
           l1Info = await this.getL1Info(deviceId, tuner);
         }
-        
+
         socket.emit('tuner-status', {
           ...status,
           currentProgram,
@@ -600,6 +600,32 @@ class HDHomeRunController {
         });
       } catch (error) {
         console.error('Monitoring error:', error);
+      }
+    }, 1000);
+  }
+
+  startAntennaMode(socket, deviceId, tunerCount) {
+    this.stopMonitoring();
+
+    console.log(`Starting antenna mode for device ${deviceId} with ${tunerCount} tuners`);
+
+    this.monitoringInterval = setInterval(async () => {
+      try {
+        // Monitor all tuners simultaneously
+        const allTunersData = await Promise.all(
+          Array.from({ length: tunerCount }, (_, i) =>
+            this.getTunerStatus(deviceId, i)
+              .then(status => ({ tuner: i, status }))
+              .catch(error => {
+                console.error(`Error monitoring tuner ${i}:`, error);
+                return { tuner: i, status: null };
+              })
+          )
+        );
+
+        socket.emit('antenna-mode-status', allTunersData);
+      } catch (error) {
+        console.error('Antenna mode monitoring error:', error);
       }
     }, 1000);
   }
@@ -743,6 +769,11 @@ io.on('connection', (socket) => {
   socket.on('start-monitoring', ({ deviceId, tuner }) => {
     console.log(`Starting monitoring for device ${deviceId}, tuner ${tuner}`);
     hdhrController.startMonitoring(socket, deviceId, tuner);
+  });
+
+  socket.on('start-antenna-mode', ({ deviceId, tunerCount }) => {
+    console.log(`Starting antenna mode for device ${deviceId} with ${tunerCount} tuners`);
+    hdhrController.startAntennaMode(socket, deviceId, tunerCount);
   });
 
   socket.on('stop-monitoring', () => {

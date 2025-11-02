@@ -32,7 +32,9 @@ import {
   TableCell,
   TableContainer,
   TableHead,
-  TableRow
+  TableRow,
+  ToggleButton,
+  ToggleButtonGroup
 } from '@mui/material';
 import {
   Refresh as RefreshIcon,
@@ -47,10 +49,12 @@ import {
   Tv as TvIcon,
   Stop as StopIcon,
   PowerOff as PowerOffIcon,
-  GetApp as InstallIcon
+  GetApp as InstallIcon,
+  Satellite as AntennaIcon
 } from '@mui/icons-material';
 import axios from 'axios';
 import io from 'socket.io-client';
+import AntennaMode from './AntennaMode';
 
 const CHANNEL_MAPS = [
   { value: 'us-bcast', label: 'US Broadcast' },
@@ -116,6 +120,8 @@ function SignalMeter() {
   const [plpInfo, setPlpInfo] = useState(null);
   const [l1Info, setL1Info] = useState(null);
   const [isAtsc3Channel, setIsAtsc3Channel] = useState(false);
+  const [antennaMode, setAntennaMode] = useState(false);
+  const [allTunersData, setAllTunersData] = useState([]);
 
   // Refs to track current device/tuner for reconnection
   const selectedDeviceRef = React.useRef(selectedDevice);
@@ -159,6 +165,10 @@ function SignalMeter() {
       } else {
         setL1Info(null);
       }
+    });
+
+    newSocket.on('antenna-mode-status', (data) => {
+      setAllTunersData(data);
     });
 
     // Handle socket connection/reconnection
@@ -305,6 +315,28 @@ function SignalMeter() {
     // Note: monitoring will restart via the monitoring useEffect, and
     // the auto-fetch useEffect will repopulate data for the new tuner
   }, [selectedTuner]);
+
+  // Handle antenna mode switching
+  useEffect(() => {
+    if (!socket || !selectedDevice || !deviceInfo) return;
+
+    if (antennaMode) {
+      console.log('Switching to antenna mode');
+      socket.emit('stop-monitoring');
+      socket.emit('start-antenna-mode', {
+        deviceId: selectedDevice,
+        tunerCount: deviceInfo.tuners
+      });
+    } else {
+      console.log('Switching to normal mode');
+      socket.emit('stop-monitoring');
+      socket.emit('start-monitoring', {
+        deviceId: selectedDevice,
+        tuner: selectedTuner
+      });
+      setAllTunersData([]); // Clear antenna mode data
+    }
+  }, [antennaMode, selectedDevice, socket, deviceInfo, selectedTuner]);
 
   const discoverDevices = async () => {
     setLoading(true);
@@ -540,6 +572,17 @@ function SignalMeter() {
                 >
                   <RefreshIcon />
                 </Button>
+                {deviceInfo && (
+                  <Button
+                    variant={antennaMode ? "contained" : "outlined"}
+                    onClick={() => setAntennaMode(!antennaMode)}
+                    sx={{ minWidth: 'auto', px: 1 }}
+                    size="small"
+                    color={antennaMode ? "primary" : "inherit"}
+                  >
+                    <AntennaIcon />
+                  </Button>
+                )}
                 {showInstallButton && (
                   <Button
                     variant="contained"
@@ -556,8 +599,15 @@ function SignalMeter() {
           </Card>
         </Grid>
 
+        {/* Antenna Tuning Mode */}
+        {antennaMode && selectedDevice && (
+          <Grid item xs={12}>
+            <AntennaMode allTunersData={allTunersData} />
+          </Grid>
+        )}
+
         {/* Signal Display */}
-        {selectedDevice && (
+        {!antennaMode && selectedDevice && (
           <Grid item xs={12}>
             <Card>
               <CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}>
@@ -647,7 +697,7 @@ function SignalMeter() {
         )}
 
         {/* Controls */}
-        {selectedDevice && (
+        {!antennaMode && selectedDevice && (
           <Grid item xs={12}>
             <Card>
               <CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}>
@@ -690,7 +740,7 @@ function SignalMeter() {
         )}
 
         {/* ATSC 3.0 Status Indicator */}
-        {selectedDevice && isAtsc3Channel && (
+        {!antennaMode && selectedDevice && isAtsc3Channel && (
           <Grid item xs={12}>
             <Card>
               <CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}>
@@ -712,7 +762,7 @@ function SignalMeter() {
         )}
 
         {/* PLP Information */}
-        {selectedDevice && plpInfo && (
+        {!antennaMode && selectedDevice && plpInfo && (
           <Grid item xs={12}>
             <Card>
               <CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}>
@@ -775,7 +825,7 @@ function SignalMeter() {
         )}
 
         {/* L1 Information */}
-        {selectedDevice && l1Info && (
+        {!antennaMode && selectedDevice && l1Info && (
           <Grid item xs={12}>
             <Card>
               <CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}>
@@ -800,7 +850,7 @@ function SignalMeter() {
         )}
 
         {/* Current Channel Programs */}
-        {selectedDevice && currentChannelPrograms.length > 0 && (
+        {!antennaMode && selectedDevice && currentChannelPrograms.length > 0 && (
           <Grid item xs={12}>
             <Card>
               <CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}>
