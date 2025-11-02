@@ -123,9 +123,11 @@ function SignalMeter() {
   const [antennaMode, setAntennaMode] = useState(false);
   const [allTunersData, setAllTunersData] = useState([]);
 
-  // Refs to track current device/tuner for reconnection
+  // Refs to track current device/tuner/mode for reconnection
   const selectedDeviceRef = React.useRef(selectedDevice);
   const selectedTunerRef = React.useRef(selectedTuner);
+  const antennaModeRef = React.useRef(antennaMode);
+  const deviceInfoRef = React.useRef(deviceInfo);
 
   // Keep refs in sync with state
   React.useEffect(() => {
@@ -135,6 +137,14 @@ function SignalMeter() {
   React.useEffect(() => {
     selectedTunerRef.current = selectedTuner;
   }, [selectedTuner]);
+
+  React.useEffect(() => {
+    antennaModeRef.current = antennaMode;
+  }, [antennaMode]);
+
+  React.useEffect(() => {
+    deviceInfoRef.current = deviceInfo;
+  }, [deviceInfo]);
 
   useEffect(() => {
     discoverDevices();
@@ -181,11 +191,21 @@ function SignalMeter() {
         if (selectedDeviceRef.current) {
           // Add small delay to ensure socket is fully ready
           setTimeout(() => {
-            console.log('Emitting start-monitoring for device:', selectedDeviceRef.current, 'tuner:', selectedTunerRef.current);
-            newSocket.emit('start-monitoring', {
-              deviceId: selectedDeviceRef.current,
-              tuner: selectedTunerRef.current
-            });
+            if (antennaModeRef.current) {
+              // Restart antenna mode
+              console.log('Emitting start-antenna-mode for device:', selectedDeviceRef.current, 'tuners:', deviceInfoRef.current?.tuners);
+              newSocket.emit('start-antenna-mode', {
+                deviceId: selectedDeviceRef.current,
+                tunerCount: deviceInfoRef.current?.tuners || 2
+              });
+            } else {
+              // Restart normal monitoring
+              console.log('Emitting start-monitoring for device:', selectedDeviceRef.current, 'tuner:', selectedTunerRef.current);
+              newSocket.emit('start-monitoring', {
+                deviceId: selectedDeviceRef.current,
+                tuner: selectedTunerRef.current
+              });
+            }
           }, 100);
         } else {
           console.log('No device selected, skipping monitoring restart');
