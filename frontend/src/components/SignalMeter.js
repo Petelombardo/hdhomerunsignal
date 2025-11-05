@@ -128,6 +128,7 @@ function SignalMeter() {
   const selectedTunerRef = React.useRef(selectedTuner);
   const antennaModeRef = React.useRef(antennaMode);
   const deviceInfoRef = React.useRef(deviceInfo);
+  const pendingProgramFetchRef = React.useRef(null);
 
   // Keep refs in sync with state
   React.useEffect(() => {
@@ -391,6 +392,12 @@ function SignalMeter() {
     if (!selectedDevice || !channel) return;
 
     try {
+      // Cancel any pending program fetch from previous channel change
+      if (pendingProgramFetchRef.current) {
+        pendingProgramFetchRef.current.cancelled = true;
+        pendingProgramFetchRef.current = null;
+      }
+
       // Clear old data immediately when changing channels
       setCurrentChannelPrograms([]);
       setPlpInfo(null);
@@ -405,19 +412,30 @@ function SignalMeter() {
       setSelectedChannel(channel);
       // Don't clear directChannel - it will be updated by the useEffect when tuner status updates
 
+      // Create cancellation token for this fetch operation
+      const fetchToken = { cancelled: false };
+      pendingProgramFetchRef.current = fetchToken;
+
       // Wait for tuner to lock with progressive delays
       const waitAndGetPrograms = async () => {
         // Initial wait
         await new Promise(resolve => setTimeout(resolve, 2000));
-        await getCurrentChannelPrograms();
+
+        // Check if this operation was cancelled
+        if (fetchToken.cancelled) return;
+
+        const firstResponse = await getCurrentChannelPrograms();
 
         // Try again after longer delay for slow-locking channels
-        setTimeout(async () => {
-          const response = await axios.get(`/api/devices/${selectedDevice}/tuner/${selectedTuner}/programs`);
-          if (response.data.length > currentChannelPrograms.length) {
-            setCurrentChannelPrograms(response.data);
-          }
-        }, 4000);
+        await new Promise(resolve => setTimeout(resolve, 4000));
+
+        // Check again if this operation was cancelled before updating state
+        if (fetchToken.cancelled) return;
+
+        const response = await axios.get(`/api/devices/${selectedDevice}/tuner/${selectedTuner}/programs`);
+        if (response.data.length > (firstResponse?.length || 0)) {
+          setCurrentChannelPrograms(response.data);
+        }
       };
 
       waitAndGetPrograms();
@@ -427,14 +445,16 @@ function SignalMeter() {
   };
 
   const getCurrentChannelPrograms = async () => {
-    if (!selectedDevice) return;
-    
+    if (!selectedDevice) return [];
+
     try {
       const response = await axios.get(`/api/devices/${selectedDevice}/tuner/${selectedTuner}/programs`);
       setCurrentChannelPrograms(response.data);
+      return response.data;
     } catch (error) {
       console.error('Failed to get current channel programs:', error);
       setCurrentChannelPrograms([]);
+      return [];
     }
   };
 
