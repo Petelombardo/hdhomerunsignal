@@ -57,6 +57,11 @@ The Docker image will automatically select the correct architecture for your pla
 
 ## Installation & Setup
 
+Pull the pre-built container from Docker Hub
+https://hub.docker.com/r/petelombardo/hdhomerun-signal-web
+
+OR
+
 1. **Clone or download this project to your server**
 
 2. **Build and start the container:**
