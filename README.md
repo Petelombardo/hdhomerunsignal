@@ -1,15 +1,16 @@
 # HDHomeRun Signal Monitor
 
-A modern web application that replaces the discontinued HDHomeRun Signal Android app. This web app provides real-time signal monitoring, channel tuning, and device management for HDHomeRun devices.
+A modern web application that replaces the discontinued HDHomeRun Signal Android app. This web app provides real-time signal monitoring, channel tuning, and device management for HDHomeRun devices in both the United States and United Kingdom/EU markets.
 
 ## Features
 
+- **Multi-Region Support**: Supports both US (ATSC) and UK/EU (DVB-T/T2) broadcast standards with region-specific channel maps
 - **Device Discovery**: Automatically finds HDHomeRun devices on your network
 - **Real-time Signal Monitoring**: Live updates of signal strength, SNR quality, and symbol quality with dBm/dB estimates
 - **Antenna Tuning Mode**: Monitor all tuners simultaneously with real-time graphs for optimal antenna positioning
 - **Direct Channel Tuning**: Quickly tune to specific channels with channel up/down controls
 - **Multi-tuner Support**: Switch between tuners on devices that support multiple tuners
-- **ATSC 3.0 Support**: Displays PLP and L1 information for NextGen TV broadcasts
+- **ATSC 3.0 Support**: Displays PLP and L1 information for NextGen TV broadcasts (US)
 - **Program Detection**: Automatically shows available programs/PIDs on tuned channels
 - **Progressive Web App**: Install on mobile devices for a native app experience
 - **Responsive Design**: Works on both desktop and mobile devices
@@ -24,14 +25,15 @@ Antenna Mode
 
 
 The original Android app functionality has been recreated and enhanced with:
+- Region selection (US / UK-EU) with appropriate broadcast standards
 - Device selection dropdown
 - Real-time signal strength, SNR quality, and symbol quality meters with dB conversion
 - **Antenna tuning mode** - simultaneous monitoring of all tuners with real-time graphing (new!)
 - Direct channel tuning with up/down controls
-- Channel map selection (us-bcast, us-cable, us-hrc, us-irc)
+- Channel map selection (region-specific: US broadcast/cable/HRC/IRC or UK-EU broadcast/cable)
 - Data rate monitoring
 - Program/PID listing for tuned channels
-- ATSC 3.0 advanced information display
+- ATSC 3.0 advanced information display (US)
 - Automatic reconnection after network interruptions
 
 ## Prerequisites
@@ -108,11 +110,26 @@ Perfect for aligning your antenna for optimal signal reception:
 
 ## Configuration
 
+### Region Selection
+Select your region (United States or United Kingdom/EU) to configure the app for your broadcast standard:
+- **United States**: ATSC 1.0/3.0 broadcasts, channels 2-36
+- **United Kingdom / EU**: DVB-T/T2 broadcasts, channels 5-60
+
+**Important**: You must have a region-appropriate HDHomeRun device:
+- US models work with ATSC broadcasts
+- EU models (HDHomeRun Connect Duo EU, etc.) work with DVB-T/T2 broadcasts
+
 ### Channel Maps
+
+**United States:**
 - **US Broadcast**: Standard over-the-air channels
 - **US Cable**: Cable TV channels
 - **US HRC**: Harmonically Related Carrier cable
 - **US IRC**: Incrementally Related Carrier cable
+
+**United Kingdom / EU:**
+- **UK/EU Broadcast**: Standard DVB-T/T2 over-the-air channels
+- **UK/EU Cable**: Cable TV channels
 
 ### Signal Quality Interpretation
 - **Signal Strength**: Raw power level (aim for 80%+)

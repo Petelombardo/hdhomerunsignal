@@ -1,0 +1,3 @@
+#ssh root@rock5b.local /mnt/usb/podman/crossbow/backup.sh --env=prod --retention=7
+#rsync -av --exclude=node_modules --exclude=.git nginx database frontend backend root@rock5b.local:/mnt/usb/podman/crossbow/
+rsync -av --exclude=node_modules --exclude=version.json --exclude=.env.local --exclude=build --exclude=.git frontend backend Dockerfile docker-compose.yml /mnt/usb/podman/hdhomerun/

@@ -56,17 +56,49 @@ import axios from 'axios';
 import io from 'socket.io-client';
 import AntennaMode from './AntennaMode';
 
-const CHANNEL_MAPS = [
-  { value: 'us-bcast', label: 'US Broadcast' },
-  { value: 'us-cable', label: 'US Cable' },
-  { value: 'us-hrc', label: 'US HRC' },
-  { value: 'us-irc', label: 'US IRC' }
+const REGIONS = [
+  { value: 'us', label: 'United States' },
+  { value: 'eu', label: 'United Kingdom / EU' }
 ];
 
+const CHANNEL_MAPS = {
+  us: [
+    { value: 'us-bcast', label: 'US Broadcast' },
+    { value: 'us-cable', label: 'US Cable' },
+    { value: 'us-hrc', label: 'US HRC' },
+    { value: 'us-irc', label: 'US IRC' }
+  ],
+  eu: [
+    { value: 'eu-bcast', label: 'UK/EU Broadcast' },
+    { value: 'eu-cable', label: 'UK/EU Cable' }
+  ]
+};
+
 // Convert frequency (in Hz) to broadcast channel number
-function frequencyToChannel(freqHz) {
+function frequencyToChannel(freqHz, region = 'us') {
   const freqMhz = freqHz / 1000000;
 
+  if (region === 'eu') {
+    // UK/EU DVB-T/T2 frequencies
+    // Band III (VHF): 174-230 MHz → channels 5-12
+    if (freqMhz >= 174 && freqMhz <= 230) {
+      // Channel 5: 177.5 MHz center, then +7 MHz for each channel
+      const channel = Math.round((freqMhz - 177.5) / 7) + 5;
+      return Math.max(5, Math.min(12, channel));
+    }
+
+    // Band IV/V (UHF): 470-790 MHz → channels 21-60
+    // Note: Post-700MHz clearance, many regions only use 21-48
+    if (freqMhz >= 470 && freqMhz <= 790) {
+      // Channel 21: 474 MHz center, then +8 MHz for each channel
+      const channel = Math.round((freqMhz - 474) / 8) + 21;
+      return Math.max(21, Math.min(60, channel));
+    }
+
+    return null; // Unknown frequency range
+  }
+
+  // US ATSC frequencies
   // VHF Low (channels 2-6): 54-88 MHz
   if (freqMhz >= 54 && freqMhz <= 88) {
     // Channel 2: 57 MHz center, Channel 3: 63, Channel 4: 69, Channel 5: 79, Channel 6: 85
@@ -103,12 +135,27 @@ function frequencyToChannel(freqHz) {
   return null; // Unknown frequency range
 }
 
+// Get channel range for region
+function getChannelRange(region) {
+  return region === 'eu'
+    ? { min: 5, max: 60 }  // EU: VHF 5-12, UHF 21-60
+    : { min: 2, max: 36 }; // US: VHF 2-13, UHF 14-36
+}
+
 function SignalMeter() {
+  // Load region from localStorage, default to 'us'
+  const [region, setRegion] = useState(() => {
+    return localStorage.getItem('hdhr-region') || 'us';
+  });
+
   const [devices, setDevices] = useState([]);
   const [selectedDevice, setSelectedDevice] = useState('');
   const [deviceInfo, setDeviceInfo] = useState(null);
   const [selectedTuner, setSelectedTuner] = useState(0);
-  const [channelMap, setChannelMap] = useState('us-bcast');
+  const [channelMap, setChannelMap] = useState(() => {
+    // Set default channel map based on region
+    return region === 'eu' ? 'eu-bcast' : 'us-bcast';
+  });
   const [selectedChannel, setSelectedChannel] = useState('');
   const [tunerStatus, setTunerStatus] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -129,6 +176,11 @@ function SignalMeter() {
   const antennaModeRef = React.useRef(antennaMode);
   const deviceInfoRef = React.useRef(deviceInfo);
   const pendingProgramFetchRef = React.useRef(null);
+
+  // Save region preference to localStorage
+  useEffect(() => {
+    localStorage.setItem('hdhr-region', region);
+  }, [region]);
 
   // Keep refs in sync with state
   React.useEffect(() => {
@@ -296,7 +348,7 @@ function SignalMeter() {
         if (freqMatch) {
           // Has frequency - convert to channel number
           const freqHz = parseInt(freqMatch[1]);
-          const channel = frequencyToChannel(freqHz);
+          const channel = frequencyToChannel(freqHz, region);
           if (channel) {
             console.log(`Converted frequency ${freqHz} Hz to channel ${channel}`);
             setDirectChannel(channel.toString());
@@ -467,8 +519,10 @@ function SignalMeter() {
     setL1Info(null);
     setIsAtsc3Channel(false);
 
+    const channelRange = getChannelRange(region);
+
     // Use the tracked directChannel state or extract from tuner status as fallback
-    let currentChannelNum = parseInt(directChannel) || 1;
+    let currentChannelNum = parseInt(directChannel) || channelRange.min;
 
     // If directChannel is empty or invalid, try to extract from tuner status
     if (!currentChannelNum && tunerStatus?.channel) {
@@ -476,14 +530,14 @@ function SignalMeter() {
       const freqMatch = tunerStatus.channel.match(/:(\d{8,})/);
       if (freqMatch) {
         const freqHz = parseInt(freqMatch[1]);
-        currentChannelNum = frequencyToChannel(freqHz) || 1;
+        currentChannelNum = frequencyToChannel(freqHz, region) || channelRange.min;
       } else {
         const channelMatch = tunerStatus.channel.match(/(?:auto:)?(\d+)/);
-        currentChannelNum = channelMatch ? parseInt(channelMatch[1]) : 1;
+        currentChannelNum = channelMatch ? parseInt(channelMatch[1]) : channelRange.min;
       }
     }
 
-    const nextChannel = Math.min(36, currentChannelNum + 1);
+    const nextChannel = Math.min(channelRange.max, currentChannelNum + 1);
 
     try {
       await tuneToDirectChannel(nextChannel.toString());
@@ -501,8 +555,10 @@ function SignalMeter() {
     setL1Info(null);
     setIsAtsc3Channel(false);
 
+    const channelRange = getChannelRange(region);
+
     // Use the tracked directChannel state or extract from tuner status as fallback
-    let currentChannelNum = parseInt(directChannel) || 1;
+    let currentChannelNum = parseInt(directChannel) || channelRange.min;
 
     // If directChannel is empty or invalid, try to extract from tuner status
     if (!currentChannelNum && tunerStatus?.channel) {
@@ -510,14 +566,14 @@ function SignalMeter() {
       const freqMatch = tunerStatus.channel.match(/:(\d{8,})/);
       if (freqMatch) {
         const freqHz = parseInt(freqMatch[1]);
-        currentChannelNum = frequencyToChannel(freqHz) || 1;
+        currentChannelNum = frequencyToChannel(freqHz, region) || channelRange.min;
       } else {
         const channelMatch = tunerStatus.channel.match(/(?:auto:)?(\d+)/);
-        currentChannelNum = channelMatch ? parseInt(channelMatch[1]) : 1;
+        currentChannelNum = channelMatch ? parseInt(channelMatch[1]) : channelRange.min;
       }
     }
 
-    const prevChannel = Math.max(1, currentChannelNum - 1);
+    const prevChannel = Math.max(channelRange.min, currentChannelNum - 1);
 
     try {
       await tuneToDirectChannel(prevChannel.toString());
@@ -572,6 +628,25 @@ function SignalMeter() {
           <Card>
             <CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                <FormControl sx={{ minWidth: 140 }} size="small">
+                  <InputLabel>Region</InputLabel>
+                  <Select
+                    value={region}
+                    label="Region"
+                    onChange={(e) => {
+                      const newRegion = e.target.value;
+                      setRegion(newRegion);
+                      // Reset channel map to default for new region
+                      setChannelMap(newRegion === 'eu' ? 'eu-bcast' : 'us-bcast');
+                    }}
+                  >
+                    {REGIONS.map((r) => (
+                      <MenuItem key={r.value} value={r.value}>
+                        {r.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
                 <FormControl sx={{ minWidth: 180, flex: 1 }} size="small">
                   <InputLabel>Device</InputLabel>
                   <Select
@@ -669,8 +744,8 @@ function SignalMeter() {
                           tuneToDirectChannel(directChannel);
                         }
                       }}
-                      placeholder="36"
-                      sx={{ 
+                      placeholder={region === 'eu' ? '60' : '36'}
+                      sx={{
                         width: 60,
                         '& .MuiOutlinedInput-root': {
                           paddingLeft: 0,
@@ -749,7 +824,7 @@ function SignalMeter() {
                       label="Channel Map"
                       onChange={(e) => setChannelMap(e.target.value)}
                     >
-                      {CHANNEL_MAPS.map((map) => (
+                      {CHANNEL_MAPS[region].map((map) => (
                         <MenuItem key={map.value} value={map.value}>
                           {map.label}
                         </MenuItem>
