@@ -50,7 +50,8 @@ import {
   Stop as StopIcon,
   PowerOff as PowerOffIcon,
   GetApp as InstallIcon,
-  Satellite as AntennaIcon
+  Satellite as AntennaIcon,
+  PlayArrow as PlayIcon
 } from '@mui/icons-material';
 import axios from 'axios';
 import io from 'socket.io-client';
@@ -980,7 +981,7 @@ function SignalMeter() {
                         <TableCell sx={{ fontWeight: 600 }}>Virtual</TableCell>
                         <TableCell sx={{ fontWeight: 600 }}>Call Sign</TableCell>
                         <TableCell sx={{ fontWeight: 600 }}>Status</TableCell>
-                        <TableCell sx={{ fontWeight: 600 }}>Action</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>Watch</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -1008,11 +1009,16 @@ function SignalMeter() {
                           <TableCell>
                             <Button
                               size="small"
-                              variant="outlined"
-                              onClick={() => tuneToDirectChannel(`${tunerStatus?.channel?.split(':')[0]}:${program.programNum}`)}
+                              variant="contained"
+                              color="primary"
+                              onClick={() => {
+                                const channelName = `${program.callsign} ${program.virtualChannel}`;
+                                window.location.href = `/api/devices/${selectedDevice}/tuner/${selectedTuner}/stream/${program.virtualChannel}.m3u?name=${encodeURIComponent(channelName)}`;
+                              }}
                               sx={{ minWidth: 'auto', px: 1, py: 0.25, fontSize: '0.7rem' }}
+                              startIcon={<PlayIcon sx={{ fontSize: '0.9rem !important' }} />}
                             >
-                              Tune
+                              Watch
                             </Button>
                           </TableCell>
                         </TableRow>

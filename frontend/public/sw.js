@@ -1,20 +1,22 @@
-const CACHE_NAME = 'hdhr-monitor-v1';
+const CACHE_NAME = 'hdhr-monitor-v2';
 const urlsToCache = [
   '/',
-  '/static/js/bundle.js',
-  '/static/css/main.css',
   '/manifest.json',
   '/icon-192.png',
   '/icon-512.png'
 ];
 
-// Install event - cache resources
+// Install event - cache resources and skip waiting
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then((cache) => {
         console.log('Opened cache');
-        return cache.addAll(urlsToCache.filter(url => url !== '/static/js/bundle.js' && url !== '/static/css/main.css'));
+        return cache.addAll(urlsToCache);
+      })
+      .then(() => {
+        // Skip waiting to activate immediately
+        return self.skipWaiting();
       })
       .catch((error) => {
         console.log('Cache addAll failed:', error);
@@ -24,9 +26,10 @@ self.addEventListener('install', (event) => {
 
 // Fetch event - serve from cache, fallback to network
 self.addEventListener('fetch', (event) => {
-  // Skip caching for API calls and WebSocket connections
-  if (event.request.url.includes('/api/') || 
+  // Skip caching for API calls, WebSocket connections, and version files
+  if (event.request.url.includes('/api/') ||
       event.request.url.includes('/socket.io/') ||
+      event.request.url.includes('build-version.json') ||
       event.request.method !== 'GET') {
     return;
   }
@@ -40,7 +43,7 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
-// Activate event - cleanup old caches
+// Activate event - cleanup old caches and claim clients
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((cacheNames) => {
@@ -52,6 +55,9 @@ self.addEventListener('activate', (event) => {
           }
         })
       );
+    }).then(() => {
+      // Claim all clients so new SW takes effect immediately
+      return self.clients.claim();
     })
   );
 });

@@ -762,6 +762,36 @@ app.post('/api/devices/:id/tuner/:tuner/atsc3', async (req, res) => {
   }
 });
 
+// M3U playlist endpoint for streaming
+app.get('/api/devices/:id/tuner/:tuner/stream/:virtualChannel.m3u', async (req, res) => {
+  try {
+    const { id, tuner, virtualChannel } = req.params;
+    const channelName = req.query.name || virtualChannel;
+
+    // Find device IP
+    const device = hdhrController.devices.find(d => d.id === id);
+    if (!device) {
+      res.status(404).json({ error: 'Device not found' });
+      return;
+    }
+
+    // Generate M3U playlist
+    const streamUrl = `http://${device.ip}:5004/tuner${tuner}/v${virtualChannel}`;
+    const m3uContent = `#EXTM3U
+#EXTINF:-1,${channelName}
+${streamUrl}
+`;
+
+    // Set headers - force download so user's media player handles it
+    // Filename uses virtualChannel for uniqueness (e.g., 7.1.m3u)
+    res.setHeader('Content-Type', 'audio/x-mpegurl');
+    res.setHeader('Content-Disposition', `attachment; filename="${virtualChannel}.m3u"`);
+    res.send(m3uContent);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Socket.IO for real-time updates
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
@@ -785,6 +815,23 @@ io.on('connection', (socket) => {
     console.log('Client disconnected:', socket.id);
     hdhrController.stopMonitoring();
   });
+});
+
+// Version endpoint for update checking
+app.get('/api/version', (req, res) => {
+  try {
+    const versionPath = path.join(__dirname, 'public', 'build-version.json');
+    const fs = require('fs');
+    if (fs.existsSync(versionPath)) {
+      const versionData = JSON.parse(fs.readFileSync(versionPath, 'utf8'));
+      res.json(versionData);
+    } else {
+      // Fallback if version file doesn't exist
+      res.json({ hash: 'unknown', buildTime: null });
+    }
+  } catch (error) {
+    res.json({ hash: 'unknown', buildTime: null });
+  }
 });
 
 // Serve React app for all other routes
