@@ -24,10 +24,56 @@ class HDHomeRunController {
     this.activeDevice = null;
     this.activeTuner = 0;
     this.monitoringInterval = null;
+    this.deviceNameCache = new Map(); // Cache for device name lookups
+    this.cacheTTL = 5 * 60 * 1000; // 5 minute TTL
   }
 
   async discoverDevices() {
-    return new Promise((resolve, reject) => {
+    // Clear cache on explicit discovery to ensure fresh data
+    this.deviceNameCache.clear();
+
+    const devices = [];
+    const deviceSet = new Set(); // Track seen device IDs
+    const disableDiscovery = process.env.HDHOMERUN_DISABLE_DISCOVERY === 'true';
+    const manualDevices = process.env.HDHOMERUN_DEVICES || '';
+
+    // Auto-discover devices unless disabled
+    if (!disableDiscovery) {
+      const autoDiscovered = await this.autoDiscoverDevices();
+      autoDiscovered.forEach(device => {
+        if (!deviceSet.has(device.id)) {
+          deviceSet.add(device.id);
+          devices.push(device);
+        }
+      });
+    } else {
+      console.log('Auto-discovery disabled via HDHOMERUN_DISABLE_DISCOVERY');
+    }
+
+    // Add manually specified devices
+    if (manualDevices) {
+      const manualHosts = manualDevices.split(',').map(h => h.trim()).filter(h => h);
+      console.log(`Adding ${manualHosts.length} manual device(s):`, manualHosts);
+
+      const manualResults = await Promise.all(
+        manualHosts.map(host => this.getDeviceByHost(host))
+      );
+
+      manualResults.forEach(device => {
+        if (device && !deviceSet.has(device.id)) {
+          deviceSet.add(device.id);
+          devices.push(device);
+          console.log(`Added manual device: ${device.id} at ${device.ip} (${device.online ? 'online' : 'offline'})`);
+        }
+      });
+    }
+
+    this.devices = devices;
+    return devices;
+  }
+
+  async autoDiscoverDevices() {
+    return new Promise((resolve) => {
       exec('hdhomerun_config discover', (error, stdout, stderr) => {
         if (error) {
           console.error('Discovery error:', error);
@@ -36,29 +82,80 @@ class HDHomeRunController {
         }
 
         const devices = [];
-        const deviceSet = new Set(); // Track seen device IDs
+        const deviceSet = new Set();
         const lines = stdout.split('\n').filter(line => line.trim());
-        
+
         lines.forEach(line => {
           const match = line.match(/hdhomerun device ([A-F0-9-]+) found at ([0-9.]+)/);
           if (match) {
             const deviceId = match[1];
             const deviceIp = match[2];
-            
-            // Only add if we haven't seen this device ID before
+
             if (!deviceSet.has(deviceId)) {
               deviceSet.add(deviceId);
               devices.push({
                 id: deviceId,
                 ip: deviceIp,
-                name: `HDHomeRun ${deviceId}`
+                name: `HDHomeRun ${deviceId}`,
+                online: true
               });
             }
           }
         });
 
-        this.devices = devices;
         resolve(devices);
+      });
+    });
+  }
+
+  async getDeviceByHost(host) {
+    // Check cache first
+    const cached = this.deviceNameCache.get(host);
+    if (cached && Date.now() - cached.timestamp < this.cacheTTL) {
+      console.log(`Using cached device info for ${host}`);
+      return cached.device;
+    }
+
+    return new Promise((resolve) => {
+      // Query the device to verify it's reachable and get model info for the name
+      exec(`hdhomerun_config ${host} get /sys/hwmodel`, { timeout: 5000 }, (error, stdout) => {
+        if (error) {
+          console.error(`Failed to query device at ${host}:`, error.message);
+          // Return offline device instead of null so UI can show it grayed out
+          const offlineDevice = {
+            id: host,
+            ip: host,
+            name: `HDHomeRun (${host})`,
+            online: false
+          };
+          this.deviceNameCache.set(host, { device: offlineDevice, timestamp: Date.now() });
+          resolve(offlineDevice);
+          return;
+        }
+
+        const model = stdout.trim() || 'Unknown';
+
+        // Try to get the device ID for display purposes
+        exec(`hdhomerun_config discover ${host}`, { timeout: 5000 }, (discoverErr, discoverOut) => {
+          const match = discoverOut && discoverOut.match(/hdhomerun device ([A-F0-9-]+) found at ([0-9.]+)/);
+          const deviceId = match ? match[1] : null;
+
+          // Always use the user-specified host as the ID for commands
+          // This ensures hdhomerun_config can reach the device directly by IP/hostname
+          // rather than trying to rediscover it (which may fail across subnets)
+          const device = {
+            id: host,
+            ip: host,
+            name: deviceId ? `HDHomeRun ${deviceId} (${model})` : `HDHomeRun ${model} (${host})`,
+            online: true
+          };
+
+          // Cache the result
+          this.deviceNameCache.set(host, { device, timestamp: Date.now() });
+          console.log(`Cached device info for ${host}`);
+
+          resolve(device);
+        });
       });
     });
   }

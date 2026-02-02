@@ -417,9 +417,15 @@ function SignalMeter() {
     try {
       const response = await axios.get('/api/devices');
       setDevices(response.data);
-      if (response.data.length > 0) {
-        setSelectedDevice(response.data[0].id);
-        await getDeviceInfo(response.data[0].id);
+      // Auto-select first online device
+      const firstOnlineDevice = response.data.find(d => d.online !== false);
+      if (firstOnlineDevice) {
+        setSelectedDevice(firstOnlineDevice.id);
+        await getDeviceInfo(firstOnlineDevice.id);
+      } else if (response.data.length > 0) {
+        // All devices offline - clear selection
+        setSelectedDevice('');
+        setDeviceInfo(null);
       }
     } catch (error) {
       console.error('Failed to discover devices:', error);
@@ -673,8 +679,13 @@ function SignalMeter() {
                     }}
                   >
                     {devices.map((device) => (
-                      <MenuItem key={device.id} value={device.id}>
-                        {device.id}
+                      <MenuItem
+                        key={device.id}
+                        value={device.id}
+                        disabled={device.online === false}
+                        sx={device.online === false ? { color: 'text.disabled', fontStyle: 'italic' } : {}}
+                      >
+                        {device.name || device.id}{device.online === false ? ' (offline)' : ''}
                       </MenuItem>
                     ))}
                   </Select>
