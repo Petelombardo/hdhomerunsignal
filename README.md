@@ -110,6 +110,39 @@ Perfect for aligning your antenna for optimal signal reception:
 
 ## Configuration
 
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PORT` | Web server port | `3000` |
+| `HDHOMERUN_DEVICES` | Comma-separated list of device IPs or hostnames to manually add (supplements auto-discovery) | *(empty)* |
+| `HDHOMERUN_DISABLE_DISCOVERY` | Set to `true` to disable auto-discovery (use only manually specified devices) | `false` |
+
+**Examples:**
+
+```bash
+# Add a specific device on a different subnet
+HDHOMERUN_DEVICES=192.168.2.50
+
+# Add multiple devices
+HDHOMERUN_DEVICES=192.168.1.100,hdhomerun.local,10.0.0.25
+
+# Disable auto-discovery and only use specified devices
+HDHOMERUN_DISABLE_DISCOVERY=true
+HDHOMERUN_DEVICES=192.168.1.100,192.168.1.101
+```
+
+**Docker Compose example:**
+```yaml
+services:
+  hdhomerun-signal:
+    image: petelombardo/hdhomerun-signal-web
+    network_mode: host
+    environment:
+      - HDHOMERUN_DEVICES=192.168.2.50,192.168.2.51
+      - HDHOMERUN_DISABLE_DISCOVERY=false
+```
+
 ### Region Selection
 Select your region (United States or United Kingdom/EU) to configure the app for your broadcast standard:
 - **United States**: ATSC 1.0/3.0 broadcasts, channels 2-36

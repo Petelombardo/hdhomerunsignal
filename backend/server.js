@@ -81,8 +81,8 @@ class HDHomeRunController {
           return;
         }
 
-        const devices = [];
         const deviceSet = new Set();
+        const discoveredDevices = [];
         const lines = stdout.split('\n').filter(line => line.trim());
 
         lines.forEach(line => {
@@ -93,17 +93,32 @@ class HDHomeRunController {
 
             if (!deviceSet.has(deviceId)) {
               deviceSet.add(deviceId);
-              devices.push({
-                id: deviceId,
-                ip: deviceIp,
-                name: `HDHomeRun ${deviceId}`,
-                online: true
-              });
+              discoveredDevices.push({ deviceId, deviceIp });
             }
           }
         });
 
-        resolve(devices);
+        // Fetch model info for each discovered device
+        Promise.all(
+          discoveredDevices.map(({ deviceId, deviceIp }) => this.getDeviceModel(deviceIp).then(model => ({
+            id: deviceId,
+            ip: deviceIp,
+            name: model ? `HDHomeRun ${deviceId} (${model})` : `HDHomeRun ${deviceId}`,
+            online: true
+          })))
+        ).then(devices => resolve(devices));
+      });
+    });
+  }
+
+  async getDeviceModel(host) {
+    return new Promise((resolve) => {
+      exec(`hdhomerun_config ${host} get /sys/hwmodel`, { timeout: 5000 }, (error, stdout) => {
+        if (error) {
+          resolve(null);
+          return;
+        }
+        resolve(stdout.trim() || null);
       });
     });
   }
