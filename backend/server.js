@@ -875,9 +875,9 @@ app.post('/api/devices/:id/tuner/:tuner/atsc3', async (req, res) => {
 });
 
 // M3U playlist endpoint for streaming
-app.get('/api/devices/:id/tuner/:tuner/stream/:virtualChannel.m3u', async (req, res) => {
+app.get('/api/devices/:id/stream/:virtualChannel.m3u', async (req, res) => {
   try {
-    const { id, tuner, virtualChannel } = req.params;
+    const { id, virtualChannel } = req.params;
     const channelName = req.query.name || virtualChannel;
 
     // Find device IP
@@ -887,8 +887,8 @@ app.get('/api/devices/:id/tuner/:tuner/stream/:virtualChannel.m3u', async (req, 
       return;
     }
 
-    // Generate M3U playlist
-    const streamUrl = `http://${device.ip}:5004/tuner${tuner}/v${virtualChannel}`;
+    // Generate M3U playlist using 'auto' so the device picks an available tuner
+    const streamUrl = `http://${device.ip}:5004/auto/v${virtualChannel}`;
     const m3uContent = `#EXTM3U
 #EXTINF:-1,${channelName}
 ${streamUrl}

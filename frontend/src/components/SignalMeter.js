@@ -1024,7 +1024,7 @@ function SignalMeter() {
                               color="primary"
                               onClick={() => {
                                 const channelName = `${program.callsign} ${program.virtualChannel}`;
-                                window.location.href = `/api/devices/${selectedDevice}/tuner/${selectedTuner}/stream/${program.virtualChannel}.m3u?name=${encodeURIComponent(channelName)}`;
+                                window.location.href = `/api/devices/${selectedDevice}/stream/${program.virtualChannel}.m3u?name=${encodeURIComponent(channelName)}`;
                               }}
                               sx={{ minWidth: 'auto', px: 1, py: 0.25, fontSize: '0.7rem' }}
                               startIcon={<PlayIcon sx={{ fontSize: '0.9rem !important' }} />}
