@@ -8,6 +8,7 @@ services:
     network_mode: host
     restart: unless-stopped
     environment:
+      - PORT=3000
       # Manually specify HDHomeRun devices by IP or hostname (comma-separated)
       #- HDHOMERUN_DEVICES=192.168.1.100,192.168.2.50
       # Set to 'true' to disable auto-discovery (only use manually specified devices)
