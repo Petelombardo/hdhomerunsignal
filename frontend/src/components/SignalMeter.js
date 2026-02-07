@@ -7,6 +7,7 @@ import {
   Button,
   Select,
   MenuItem,
+  Menu,
   FormControl,
   InputLabel,
   LinearProgress,
@@ -20,6 +21,7 @@ import {
   ListItem,
   ListItemText,
   ListItemButton,
+  ListItemIcon,
   CircularProgress,
   Accordion,
   AccordionSummary,
@@ -51,7 +53,8 @@ import {
   PowerOff as PowerOffIcon,
   GetApp as InstallIcon,
   Satellite as AntennaIcon,
-  PlayArrow as PlayIcon
+  PlayArrow as PlayIcon,
+  ContentCopy as CopyIcon
 } from '@mui/icons-material';
 import axios from 'axios';
 import io from 'socket.io-client';
@@ -170,6 +173,7 @@ function SignalMeter() {
   const [isAtsc3Channel, setIsAtsc3Channel] = useState(false);
   const [antennaMode, setAntennaMode] = useState(false);
   const [allTunersData, setAllTunersData] = useState([]);
+  const [contextMenu, setContextMenu] = useState(null); // { mouseX, mouseY, program }
 
   // Refs to track current device/tuner/mode for reconnection
   const selectedDeviceRef = React.useRef(selectedDevice);
@@ -1026,6 +1030,10 @@ function SignalMeter() {
                                 const channelName = `${program.callsign} ${program.virtualChannel}`;
                                 window.location.href = `/api/devices/${selectedDevice}/stream/${program.virtualChannel}.m3u?name=${encodeURIComponent(channelName)}`;
                               }}
+                              onContextMenu={(e) => {
+                                e.preventDefault();
+                                setContextMenu({ mouseX: e.clientX, mouseY: e.clientY, program });
+                              }}
                               sx={{ minWidth: 'auto', px: 1, py: 0.25, fontSize: '0.7rem' }}
                               startIcon={<PlayIcon sx={{ fontSize: '0.9rem !important' }} />}
                             >
@@ -1042,6 +1050,39 @@ function SignalMeter() {
           </Grid>
         )}
       </Grid>
+
+      {/* Context menu for copying stream URL */}
+      <Menu
+        open={contextMenu !== null}
+        onClose={() => setContextMenu(null)}
+        anchorReference="anchorPosition"
+        anchorPosition={
+          contextMenu !== null
+            ? { top: contextMenu.mouseY, left: contextMenu.mouseX }
+            : undefined
+        }
+      >
+        <MenuItem
+          onClick={async () => {
+            if (contextMenu?.program) {
+              try {
+                const response = await axios.get(
+                  `/api/devices/${selectedDevice}/stream/${contextMenu.program.virtualChannel}/url`
+                );
+                await navigator.clipboard.writeText(response.data.url);
+              } catch (error) {
+                console.error('Failed to copy stream URL:', error);
+              }
+            }
+            setContextMenu(null);
+          }}
+        >
+          <ListItemIcon>
+            <CopyIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Copy Stream URL</ListItemText>
+        </MenuItem>
+      </Menu>
 
     </Box>
   );

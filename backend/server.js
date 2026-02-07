@@ -874,6 +874,25 @@ app.post('/api/devices/:id/tuner/:tuner/atsc3', async (req, res) => {
   }
 });
 
+// Get stream URL only (for copying to clipboard)
+app.get('/api/devices/:id/stream/:virtualChannel/url', async (req, res) => {
+  try {
+    const { id, virtualChannel } = req.params;
+
+    // Find device IP
+    const device = hdhrController.devices.find(d => d.id === id);
+    if (!device) {
+      res.status(404).json({ error: 'Device not found' });
+      return;
+    }
+
+    const streamUrl = `http://${device.ip}:5004/auto/v${virtualChannel}`;
+    res.json({ url: streamUrl });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // M3U playlist endpoint for streaming
 app.get('/api/devices/:id/stream/:virtualChannel.m3u', async (req, res) => {
   try {

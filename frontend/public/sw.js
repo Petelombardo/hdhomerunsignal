@@ -1,4 +1,4 @@
-const CACHE_NAME = 'hdhr-monitor-v2';
+const CACHE_NAME = 'hdhr-monitor-v3';
 const urlsToCache = [
   '/',
   '/manifest.json',
@@ -24,7 +24,7 @@ self.addEventListener('install', (event) => {
   );
 });
 
-// Fetch event - serve from cache, fallback to network
+// Fetch event - network-first for HTML, cache-first for assets
 self.addEventListener('fetch', (event) => {
   // Skip caching for API calls, WebSocket connections, and version files
   if (event.request.url.includes('/api/') ||
@@ -34,11 +34,48 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Network-first for HTML documents (navigation requests)
+  // This ensures we always get the latest index.html with correct JS references
+  if (event.request.mode === 'navigate' ||
+      event.request.destination === 'document' ||
+      event.request.url.endsWith('/') ||
+      event.request.url.endsWith('.html')) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          // Cache the fresh HTML for offline fallback
+          const responseClone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseClone);
+          });
+          return response;
+        })
+        .catch(() => {
+          // Offline - try to serve from cache
+          return caches.match(event.request);
+        })
+    );
+    return;
+  }
+
+  // Cache-first for static assets (JS, CSS, images)
   event.respondWith(
     caches.match(event.request)
       .then((response) => {
-        // Return cached version or fetch from network
-        return response || fetch(event.request);
+        if (response) {
+          return response;
+        }
+        // Not in cache - fetch and cache it
+        return fetch(event.request).then((fetchResponse) => {
+          // Only cache successful responses for static assets
+          if (fetchResponse.ok && event.request.url.match(/\.(js|css|png|jpg|ico|woff2?)$/)) {
+            const responseClone = fetchResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(event.request, responseClone);
+            });
+          }
+          return fetchResponse;
+        });
       })
   );
 });
