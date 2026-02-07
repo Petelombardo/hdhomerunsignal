@@ -44,16 +44,17 @@ The original Android app functionality has been recreated and enhanced with:
 
 ### System Requirements
 
-This application supports all modern CPU architectures including:
+**Prebuilt Docker images are available for:**
 - **x86_64** (AMD64) - Traditional desktops and servers
-- **ARM64** (aarch64) - Raspberry Pi 3/4/5, Apple Silicon Macs, AWS Graviton
-- **ARMv7** - Older Raspberry Pi models (Pi 2)
+- **ARM64** (aarch64) - Raspberry Pi 4/5, Orange Pi, Banana Pi, and other ARMv8 SBCs
 
-**Running on a Raspberry Pi is ideal** for this application. A Raspberry Pi provides:
+**Recommended hardware:** Raspberry Pi 4 or newer, or other ARMv8-based single-board computers. These provide:
 - Low power consumption (perfect for 24/7 operation)
 - Small form factor (can be placed near your antenna/HDHomeRun)
 - More than sufficient processing power for signal monitoring
 - Cost-effective dedicated hardware
+
+**Other architectures:** If your CPU architecture is not among the supported ones, you can build the container yourself from source. A minimum of 4GB RAM is required for compilation.
 
 The Docker image will automatically select the correct architecture for your platform.
 
