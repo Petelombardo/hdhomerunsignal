@@ -875,18 +875,24 @@ app.post('/api/devices/:id/tuner/:tuner/atsc3', async (req, res) => {
 });
 
 // Get stream URL only (for copying to clipboard)
-app.get('/api/devices/:id/stream/:virtualChannel/url', async (req, res) => {
+// Uses RF channel + program number to avoid virtual channel ambiguity
+app.get('/api/devices/:id/stream/url', async (req, res) => {
   try {
-    const { id, virtualChannel } = req.params;
+    const { id } = req.params;
+    const { ch, program } = req.query;
 
-    // Find device IP
+    if (!ch || !program) {
+      res.status(400).json({ error: 'Missing ch or program query parameter' });
+      return;
+    }
+
     const device = hdhrController.devices.find(d => d.id === id);
     if (!device) {
       res.status(404).json({ error: 'Device not found' });
       return;
     }
 
-    const streamUrl = `http://${device.ip}:5004/auto/v${virtualChannel}`;
+    const streamUrl = `http://${device.ip}:5004/auto/ch${ch}-${program}`;
     res.json({ url: streamUrl });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -894,29 +900,36 @@ app.get('/api/devices/:id/stream/:virtualChannel/url', async (req, res) => {
 });
 
 // M3U playlist endpoint for streaming
-app.get('/api/devices/:id/stream/:virtualChannel.m3u', async (req, res) => {
+// Uses RF channel + program number instead of virtual channel
+app.get('/api/devices/:id/stream/play.m3u', async (req, res) => {
   try {
-    const { id, virtualChannel } = req.params;
-    const channelName = req.query.name || virtualChannel;
+    const { id } = req.params;
+    const { ch, program, name } = req.query;
 
-    // Find device IP
+    if (!ch || !program) {
+      res.status(400).json({ error: 'Missing ch or program query parameter' });
+      return;
+    }
+
+    const channelName = name || `Ch${ch} Program ${program}`;
+
     const device = hdhrController.devices.find(d => d.id === id);
     if (!device) {
       res.status(404).json({ error: 'Device not found' });
       return;
     }
 
-    // Generate M3U playlist using 'auto' so the device picks an available tuner
-    const streamUrl = `http://${device.ip}:5004/auto/v${virtualChannel}`;
+    // Tune by RF channel + program number so no channel scan is needed
+    // and virtual channel collisions (e.g. two stations on 2.1) are avoided
+    const streamUrl = `http://${device.ip}:5004/auto/ch${ch}-${program}`;
     const m3uContent = `#EXTM3U
 #EXTINF:-1,${channelName}
 ${streamUrl}
 `;
 
-    // Set headers - force download so user's media player handles it
-    // Filename uses virtualChannel for uniqueness (e.g., 7.1.m3u)
     res.setHeader('Content-Type', 'audio/x-mpegurl');
-    res.setHeader('Content-Disposition', `attachment; filename="${virtualChannel}.m3u"`);
+    const filename = name ? name.replace(/[^a-zA-Z0-9._-]/g, '_') : `ch${ch}-${program}`;
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}.m3u"`);
     res.send(m3uContent);
   } catch (error) {
     res.status(500).json({ error: error.message });

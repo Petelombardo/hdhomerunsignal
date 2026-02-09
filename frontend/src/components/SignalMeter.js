@@ -1027,8 +1027,10 @@ function SignalMeter() {
                               variant="contained"
                               color="primary"
                               onClick={() => {
+                                const rfChannel = tunerStatus?.channel?.split(':')[1];
+                                if (!rfChannel) return;
                                 const channelName = `${program.callsign} ${program.virtualChannel}`;
-                                window.location.href = `/api/devices/${selectedDevice}/stream/${program.virtualChannel}.m3u?name=${encodeURIComponent(channelName)}`;
+                                window.location.href = `/api/devices/${selectedDevice}/stream/play.m3u?ch=${rfChannel}&program=${program.programNum}&name=${encodeURIComponent(channelName)}`;
                               }}
                               onContextMenu={(e) => {
                                 e.preventDefault();
@@ -1066,8 +1068,10 @@ function SignalMeter() {
           onClick={async () => {
             if (contextMenu?.program) {
               try {
+                const rfChannel = tunerStatus?.channel?.split(':')[1];
+                if (!rfChannel) return;
                 const response = await axios.get(
-                  `/api/devices/${selectedDevice}/stream/${contextMenu.program.virtualChannel}/url`
+                  `/api/devices/${selectedDevice}/stream/url?ch=${rfChannel}&program=${contextMenu.program.programNum}`
                 );
                 await navigator.clipboard.writeText(response.data.url);
               } catch (error) {
