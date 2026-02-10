@@ -11,6 +11,7 @@ A modern web application that replaces the discontinued HDHomeRun Signal Android
 - **Direct Channel Tuning**: Quickly tune to specific channels with channel up/down controls
 - **Multi-tuner Support**: Switch between tuners on devices that support multiple tuners
 - **ATSC 3.0 Support**: Displays PLP and L1 information for NextGen TV broadcasts (US)
+- **Watch Live TV**: Click to watch any detected program in your local media player (VLC, mpv, etc.) via M3U playlist, with right-click option to copy the stream URL
 - **Program Detection**: Automatically shows available programs/PIDs on tuned channels
 - **Progressive Web App**: Install on mobile devices for a native app experience
 - **Responsive Design**: Works on both desktop and mobile devices
@@ -32,7 +33,8 @@ The original Android app functionality has been recreated and enhanced with:
 - Direct channel tuning with up/down controls
 - Channel map selection (region-specific: US broadcast/cable/HRC/IRC or UK-EU broadcast/cable)
 - Data rate monitoring
-- Program/PID listing for tuned channels
+- Program/PID listing for tuned channels with Watch buttons
+- Watch live TV directly from the app using M3U stream URLs
 - ATSC 3.0 advanced information display (US)
 - Automatic reconnection after network interruptions
 
@@ -88,7 +90,8 @@ OR
    - The app automatically detects channels tuned by other applications (e.g., tvheadend)
 4. **Monitor Signal**: View real-time signal strength (dBm), SNR (dB), and symbol quality
 5. **View Programs**: See detected programs/PIDs and ATSC 3.0 technical details when available
-6. **Channel Map**: Select the appropriate channel map (US Broadcast is default)
+6. **Watch Live TV**: Each detected program has a **Watch** button that downloads an M3U playlist file, which opens in your default media player (VLC, mpv, etc.) to stream live TV. Right-click the Watch button to **Copy Stream URL** to your clipboard for use in any application.
+7. **Channel Map**: Select the appropriate channel map (US Broadcast is default)
 
 ### Antenna Tuning Mode
 
@@ -192,6 +195,8 @@ Select your region (United States or United Kingdom/EU) to configure the app for
 - `GET /api/devices/:id/tuner/:tuner/l1info` - Get ATSC 3.0 L1 information
 - `POST /api/devices/:id/tuner/:tuner/channel` - Set channel
 - `POST /api/devices/:id/tuner/:tuner/clear` - Clear/stop tuner
+- `GET /api/devices/:id/stream/play.m3u?ch=&program=&name=` - Download M3U playlist for a program
+- `GET /api/devices/:id/stream/url?ch=&program=` - Get raw stream URL for a program
 - WebSocket: `start-monitoring` - Begin real-time signal updates
 - WebSocket: `stop-monitoring` - Stop real-time signal updates
 
