@@ -3,9 +3,8 @@ version: '3.8'
 services:
   hdhomerun-signal:
     build: .
-#    ports:
-#      - "3000:3000"
-    network_mode: host
+    ports:
+      - "3000:3000"
     restart: unless-stopped
     environment:
       - PORT=3000

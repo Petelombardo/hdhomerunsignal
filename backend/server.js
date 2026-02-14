@@ -2,6 +2,7 @@ const express = require('express');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
 const { exec } = require('child_process');
+const https = require('https');
 const path = require('path');
 const cors = require('cors');
 
@@ -73,10 +74,29 @@ class HDHomeRunController {
   }
 
   async autoDiscoverDevices() {
+    // Try UDP broadcast discovery first
+    const udpDevices = await this.udpDiscoverDevices();
+    if (udpDevices.length > 0) {
+      console.log(`UDP discovery found ${udpDevices.length} device(s)`);
+      return udpDevices;
+    }
+
+    // Fallback to HTTP discovery API
+    console.log('UDP discovery found no devices, trying HTTP discovery fallback...');
+    const httpDevices = await this.httpDiscoverDevices();
+    if (httpDevices.length > 0) {
+      console.log(`HTTP discovery found ${httpDevices.length} device(s)`);
+    } else {
+      console.log('HTTP discovery also found no devices');
+    }
+    return httpDevices;
+  }
+
+  async udpDiscoverDevices() {
     return new Promise((resolve) => {
-      exec('hdhomerun_config discover', (error, stdout, stderr) => {
+      exec('hdhomerun_config discover', { timeout: 5000 }, (error, stdout, stderr) => {
         if (error) {
-          console.error('Discovery error:', error);
+          console.error('UDP discovery error:', error.message);
           resolve([]);
           return;
         }
@@ -107,6 +127,51 @@ class HDHomeRunController {
             online: true
           })))
         ).then(devices => resolve(devices));
+      });
+    });
+  }
+
+  async httpDiscoverDevices() {
+    return new Promise((resolve) => {
+      const req = https.get('https://ipv4-api.hdhomerun.com/discover', (res) => {
+        let data = '';
+        res.on('data', chunk => { data += chunk; });
+        res.on('end', () => {
+          try {
+            const entries = JSON.parse(data);
+            // Filter to tuner devices only (they have DeviceID; DVRs have StorageID instead)
+            const tuners = entries.filter(e => e.DeviceID);
+
+            Promise.all(
+              tuners.map(entry => {
+                const ip = entry.LocalIP;
+                const deviceId = entry.DeviceID;
+                return this.getDeviceModel(ip).then(model => ({
+                  id: ip,
+                  ip: ip,
+                  name: model
+                    ? `HDHomeRun ${deviceId} (${model})`
+                    : `HDHomeRun ${deviceId}`,
+                  online: true
+                }));
+              })
+            ).then(devices => resolve(devices));
+          } catch (parseErr) {
+            console.error('HTTP discovery JSON parse error:', parseErr.message);
+            resolve([]);
+          }
+        });
+      });
+
+      req.on('error', (err) => {
+        console.error('HTTP discovery request error:', err.message);
+        resolve([]);
+      });
+
+      req.setTimeout(5000, () => {
+        req.destroy();
+        console.error('HTTP discovery request timed out');
+        resolve([]);
       });
     });
   }
