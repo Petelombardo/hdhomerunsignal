@@ -233,6 +233,9 @@ To run in development mode:
 - Ensure port 3000 is accessible
 - Verify Docker container is running with host networking
 
+## Buy Me A Coffee
+<img width="433" height="439" alt="image" src="https://github.com/user-attachments/assets/e8555d66-fb4b-4f8e-88a8-35fc613ea400" />
+
 ## License
 
 This project is provided as-is for personal use. HDHomeRun is a trademark of SiliconDust Engineering Ltd.
