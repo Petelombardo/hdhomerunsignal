@@ -24,7 +24,7 @@ class HDHomeRunController {
     this.devices = [];
     this.activeDevice = null;
     this.activeTuner = 0;
-    this.monitoringInterval = null;
+    this.monitoringIntervals = new Map(); // Per-socket monitoring intervals
     this.deviceNameCache = new Map(); // Cache for device name lookups
     this.cacheTTL = 5 * 60 * 1000; // 5 minute TTL
   }
@@ -753,9 +753,9 @@ class HDHomeRunController {
   }
 
   startMonitoring(socket, deviceId, tuner) {
-    this.stopMonitoring();
+    this.stopMonitoring(socket);
 
-    this.monitoringInterval = setInterval(async () => {
+    const intervalId = setInterval(async () => {
       try {
         const status = await this.getTunerStatus(deviceId, tuner);
         const currentProgram = await this.getCurrentProgram(deviceId, tuner);
@@ -779,14 +779,16 @@ class HDHomeRunController {
         console.error('Monitoring error:', error);
       }
     }, 1000);
+
+    this.monitoringIntervals.set(socket.id, intervalId);
   }
 
   startAntennaMode(socket, deviceId, tunerCount) {
-    this.stopMonitoring();
+    this.stopMonitoring(socket);
 
     console.log(`Starting antenna mode for device ${deviceId} with ${tunerCount} tuners`);
 
-    this.monitoringInterval = setInterval(async () => {
+    const intervalId = setInterval(async () => {
       try {
         // Monitor all tuners simultaneously
         const allTunersData = await Promise.all(
@@ -805,12 +807,15 @@ class HDHomeRunController {
         console.error('Antenna mode monitoring error:', error);
       }
     }, 1000);
+
+    this.monitoringIntervals.set(socket.id, intervalId);
   }
 
-  stopMonitoring() {
-    if (this.monitoringInterval) {
-      clearInterval(this.monitoringInterval);
-      this.monitoringInterval = null;
+  stopMonitoring(socket) {
+    const socketId = socket?.id;
+    if (socketId && this.monitoringIntervals.has(socketId)) {
+      clearInterval(this.monitoringIntervals.get(socketId));
+      this.monitoringIntervals.delete(socketId);
     }
   }
 }
@@ -1016,13 +1021,13 @@ io.on('connection', (socket) => {
   });
 
   socket.on('stop-monitoring', () => {
-    console.log('Stopping monitoring');
-    hdhrController.stopMonitoring();
+    console.log('Stopping monitoring for:', socket.id);
+    hdhrController.stopMonitoring(socket);
   });
 
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
-    hdhrController.stopMonitoring();
+    hdhrController.stopMonitoring(socket);
   });
 });
 

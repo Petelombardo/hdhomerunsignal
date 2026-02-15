@@ -99,6 +99,7 @@ function formatChannelDisplay(channelStr) {
 
 function AntennaMode({ allTunersData }) {
   const [historyData, setHistoryData] = useState({});
+  const lastChannelRef = useRef({}); // Track last-seen channel per tuner
 
   // Update history data when new tuner data arrives
   useEffect(() => {
@@ -108,6 +109,19 @@ function AntennaMode({ allTunersData }) {
       const newHistory = { ...prev };
 
       allTunersData.forEach(({ tuner, status }) => {
+        const currentChannel = status?.channel || 'none';
+        const lastChannel = lastChannelRef.current[tuner];
+
+        // Reset history if channel changed for this tuner
+        if (lastChannel !== undefined && lastChannel !== currentChannel) {
+          newHistory[tuner] = {
+            signal: [],
+            snr: [],
+            timestamps: []
+          };
+        }
+        lastChannelRef.current[tuner] = currentChannel;
+
         if (!newHistory[tuner]) {
           newHistory[tuner] = {
             signal: [],
