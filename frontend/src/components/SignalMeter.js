@@ -139,6 +139,41 @@ function frequencyToChannel(freqHz, region = 'us') {
   return null; // Unknown frequency range
 }
 
+// Convert broadcast channel number to center frequency (in Hz)
+function channelToFrequency(channel, region = 'us') {
+  const ch = parseInt(channel, 10);
+  if (isNaN(ch)) return null;
+
+  if (region === 'eu') {
+    // Band III (VHF): channels 5-12
+    if (ch >= 5 && ch <= 12) {
+      return ((ch - 5) * 7 + 177.5) * 1000000;
+    }
+    // Band IV/V (UHF): channels 21-60
+    if (ch >= 21 && ch <= 60) {
+      return ((ch - 21) * 8 + 474) * 1000000;
+    }
+    return null;
+  }
+
+  // US ATSC frequencies
+  // VHF Low (channels 2-6)
+  const vhfLow = { 2: 57, 3: 63, 4: 69, 5: 79, 6: 85 };
+  if (vhfLow[ch]) return vhfLow[ch] * 1000000;
+
+  // VHF High (channels 7-13): 177 MHz + 6 MHz per channel
+  if (ch >= 7 && ch <= 13) {
+    return ((ch - 7) * 6 + 177) * 1000000;
+  }
+
+  // UHF (channels 14-36): 473 MHz + 6 MHz per channel
+  if (ch >= 14 && ch <= 36) {
+    return ((ch - 14) * 6 + 473) * 1000000;
+  }
+
+  return null;
+}
+
 // Get channel range for region
 function getChannelRange(region) {
   return region === 'eu'
@@ -1027,10 +1062,13 @@ function SignalMeter() {
                               variant="contained"
                               color="primary"
                               onClick={() => {
-                                const rfChannel = tunerStatus?.channel?.split(':')[1];
-                                if (!rfChannel) return;
+                                const rawChannel = tunerStatus?.channel?.split(':')[1];
+                                if (!rawChannel) return;
+                                // If it's already a frequency (9+ digits), use as-is; otherwise convert RF channel to frequency
+                                const freq = rawChannel.length >= 9 ? rawChannel : channelToFrequency(rawChannel, region);
+                                if (!freq) return;
                                 const channelName = `${program.callsign} ${program.virtualChannel}`;
-                                window.location.href = `/api/devices/${selectedDevice}/stream/play.m3u?ch=${rfChannel}&program=${program.programNum}&name=${encodeURIComponent(channelName)}`;
+                                window.location.href = `/api/devices/${selectedDevice}/stream/play.m3u?ch=${freq}&program=${program.programNum}&name=${encodeURIComponent(channelName)}`;
                               }}
                               onContextMenu={(e) => {
                                 e.preventDefault();
@@ -1068,10 +1106,12 @@ function SignalMeter() {
           onClick={async () => {
             if (contextMenu?.program) {
               try {
-                const rfChannel = tunerStatus?.channel?.split(':')[1];
-                if (!rfChannel) return;
+                const rawChannel = tunerStatus?.channel?.split(':')[1];
+                if (!rawChannel) return;
+                const freq = rawChannel.length >= 9 ? rawChannel : channelToFrequency(rawChannel, region);
+                if (!freq) return;
                 const response = await axios.get(
-                  `/api/devices/${selectedDevice}/stream/url?ch=${rfChannel}&program=${contextMenu.program.programNum}`
+                  `/api/devices/${selectedDevice}/stream/url?ch=${freq}&program=${contextMenu.program.programNum}`
                 );
                 await navigator.clipboard.writeText(response.data.url);
               } catch (error) {
