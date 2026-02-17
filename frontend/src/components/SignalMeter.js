@@ -451,10 +451,11 @@ function SignalMeter() {
     }
   }, [antennaMode, selectedDevice, socket, deviceInfo, selectedTuner]);
 
-  const discoverDevices = async () => {
+  const discoverDevices = async (force = false) => {
     setLoading(true);
     try {
-      const response = await axios.get('/api/devices');
+      const url = force ? '/api/devices?force=true' : '/api/devices';
+      const response = await axios.get(url);
       setDevices(response.data);
       // Auto-select first online device
       const firstOnlineDevice = response.data.find(d => d.online !== false);
@@ -731,7 +732,7 @@ function SignalMeter() {
                 </FormControl>
                 <Button
                   variant="outlined"
-                  onClick={discoverDevices}
+                  onClick={() => discoverDevices(true)}
                   disabled={loading}
                   sx={{ minWidth: 'auto', px: 1 }}
                   size="small"

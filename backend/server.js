@@ -27,11 +27,12 @@ class HDHomeRunController {
     this.monitoringIntervals = new Map(); // Per-socket monitoring intervals
     this.deviceNameCache = new Map(); // Cache for device name lookups
     this.cacheTTL = 5 * 60 * 1000; // 5 minute TTL
+    this.httpDiscoveryCache = null; // Cached HTTP API results; only refreshed on explicit user request
   }
 
-  async discoverDevices() {
-    // Clear cache on explicit discovery to ensure fresh data
-    this.deviceNameCache.clear();
+  async discoverDevices(forceRefresh = false) {
+    // Clear device name cache on explicit user refresh to ensure fresh data
+    if (forceRefresh) this.deviceNameCache.clear();
 
     const devices = [];
     const deviceSet = new Set(); // Track seen device IDs
@@ -40,7 +41,7 @@ class HDHomeRunController {
 
     // Auto-discover devices unless disabled
     if (!disableDiscovery) {
-      const autoDiscovered = await this.autoDiscoverDevices();
+      const autoDiscovered = await this.autoDiscoverDevices(forceRefresh);
       autoDiscovered.forEach(device => {
         if (!deviceSet.has(device.id)) {
           deviceSet.add(device.id);
@@ -73,7 +74,7 @@ class HDHomeRunController {
     return devices;
   }
 
-  async autoDiscoverDevices() {
+  async autoDiscoverDevices(forceRefresh = false) {
     // Try UDP broadcast discovery first
     const udpDevices = await this.udpDiscoverDevices();
     if (udpDevices.length > 0) {
@@ -81,7 +82,13 @@ class HDHomeRunController {
       return udpDevices;
     }
 
-    // Fallback to HTTP discovery API
+    // Fallback to HTTP discovery API - only hit the remote API on explicit user refresh
+    // to avoid hammering the HDHomeRun cloud service on every automatic call.
+    if (!forceRefresh && this.httpDiscoveryCache !== null) {
+      console.log(`UDP discovery found no devices, using cached HTTP discovery results (${this.httpDiscoveryCache.length} device(s))`);
+      return this.httpDiscoveryCache;
+    }
+
     console.log('UDP discovery found no devices, trying HTTP discovery fallback...');
     const httpDevices = await this.httpDiscoverDevices();
     if (httpDevices.length > 0) {
@@ -89,6 +96,7 @@ class HDHomeRunController {
     } else {
       console.log('HTTP discovery also found no devices');
     }
+    this.httpDiscoveryCache = httpDevices;
     return httpDevices;
   }
 
@@ -825,7 +833,8 @@ const hdhrController = new HDHomeRunController();
 // API Routes
 app.get('/api/devices', async (req, res) => {
   try {
-    const devices = await hdhrController.discoverDevices();
+    const forceRefresh = req.query.force === 'true';
+    const devices = await hdhrController.discoverDevices(forceRefresh);
     res.json(devices);
   } catch (error) {
     res.status(500).json({ error: error.message });
