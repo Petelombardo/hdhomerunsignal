@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Card,
@@ -56,9 +56,35 @@ import {
   PlayArrow as PlayIcon,
   ContentCopy as CopyIcon
 } from '@mui/icons-material';
+import { Line } from 'react-chartjs-2';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+  Filler
+} from 'chart.js';
 import axios from 'axios';
 import io from 'socket.io-client';
 import AntennaMode from './AntennaMode';
+
+// Register Chart.js components
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+  Filler
+);
+
+const MAX_SIGNAL_HISTORY = 60; // 60 seconds of data
 
 const REGIONS = [
   { value: 'us', label: 'United States' },
@@ -217,6 +243,17 @@ function SignalMeter() {
   const [allTunersData, setAllTunersData] = useState([]);
   const [contextMenu, setContextMenu] = useState(null); // { mouseX, mouseY, program }
 
+  // Signal history for the chart
+  // Pre-fill with nulls so the chart is always MAX_SIGNAL_HISTORY wide;
+  // real data flows in from the right as samples arrive.
+  const emptyHistory = () => ({
+    signal: Array(MAX_SIGNAL_HISTORY).fill(null),
+    snr: Array(MAX_SIGNAL_HISTORY).fill(null),
+    timestamps: Array(MAX_SIGNAL_HISTORY).fill('')
+  });
+  const [signalHistory, setSignalHistory] = useState(emptyHistory);
+  const lastChannelForChartRef = useRef(null);
+
   // Refs to track current device/tuner/mode for reconnection
   const selectedDeviceRef = React.useRef(selectedDevice);
   const selectedTunerRef = React.useRef(selectedTuner);
@@ -245,6 +282,35 @@ function SignalMeter() {
   React.useEffect(() => {
     deviceInfoRef.current = deviceInfo;
   }, [deviceInfo]);
+
+  // Update signal history whenever tunerStatus changes
+  useEffect(() => {
+    if (!tunerStatus) return;
+
+    const currentChannel = tunerStatus.channel || 'none';
+
+    // Reset history if channel changed
+    if (lastChannelForChartRef.current !== null && lastChannelForChartRef.current !== currentChannel) {
+      setSignalHistory(emptyHistory());
+    }
+    lastChannelForChartRef.current = currentChannel;
+
+    if (currentChannel === 'none' || !tunerStatus.lock) return;
+
+    setSignalHistory(prev => {
+      // Always keep exactly MAX_SIGNAL_HISTORY slots; shift left, push new value on right
+      const signal = [...prev.signal.slice(1), tunerStatus.ss || 0];
+      const snr = [...prev.snr.slice(1), tunerStatus.snq || 0];
+      const timestamps = [...prev.timestamps.slice(1), new Date().toLocaleTimeString()];
+      return { signal, snr, timestamps };
+    });
+  }, [tunerStatus]);
+
+  // Clear chart history when tuner changes
+  useEffect(() => {
+    setSignalHistory(emptyHistory());
+    lastChannelForChartRef.current = null;
+  }, [selectedTuner]);
 
   useEffect(() => {
     discoverDevices();
@@ -492,8 +558,6 @@ function SignalMeter() {
     }
   };
 
-
-
   const tuneToDirectChannel = async (channel) => {
     if (!selectedDevice || !channel) return;
 
@@ -614,7 +678,6 @@ function SignalMeter() {
     // Use the tracked directChannel state or extract from tuner status as fallback
     let currentChannelNum = parseInt(directChannel) || channelRange.min;
 
-    // If directChannel is empty or invalid, try to extract from tuner status
     if (!currentChannelNum && tunerStatus?.channel) {
       // Check for frequency format first
       const freqMatch = tunerStatus.channel.match(/:(\d{8,})/);
@@ -638,7 +701,7 @@ function SignalMeter() {
 
   const clearTuner = async () => {
     if (!selectedDevice) return;
-    
+
     try {
       // Clear all data immediately
       setDirectChannel('');
@@ -646,7 +709,7 @@ function SignalMeter() {
       setPlpInfo(null);
       setL1Info(null);
       setIsAtsc3Channel(false);
-      
+
       await axios.post(`/api/devices/${selectedDevice}/tuner/${selectedTuner}/clear`);
     } catch (error) {
       console.error('Failed to clear tuner:', error);
@@ -672,6 +735,92 @@ function SignalMeter() {
   const formatDataRate = (bps) => {
     if (!bps) return '0.000 Mbps';
     return (bps / 1000000).toFixed(3) + ' Mbps';
+  };
+
+  // Chart config for signal + SNR history
+  const signalChartData = {
+    labels: signalHistory.timestamps,
+    datasets: [
+      {
+        label: 'Signal',
+        data: signalHistory.signal,
+        borderColor: 'rgba(76, 175, 80, 1)',
+        backgroundColor: 'rgba(76, 175, 80, 0.15)',
+        borderWidth: 2,
+        fill: true,
+        tension: 0.4,
+        pointRadius: 1.5,
+        pointHoverRadius: 3,
+        pointBackgroundColor: 'rgba(76, 175, 80, 1)',
+        pointBorderColor: 'rgba(0, 0, 0, 0.4)',
+        pointBorderWidth: 1,
+        spanGaps: false
+      },
+      {
+        label: 'SNR',
+        data: signalHistory.snr,
+        borderColor: 'rgba(255, 152, 0, 1)',
+        backgroundColor: 'rgba(255, 152, 0, 0.10)',
+        borderWidth: 2,
+        fill: true,
+        tension: 0.4,
+        pointRadius: 1.5,
+        pointHoverRadius: 3,
+        pointBackgroundColor: 'rgba(255, 152, 0, 1)',
+        pointBorderColor: 'rgba(0, 0, 0, 0.4)',
+        pointBorderWidth: 1,
+        spanGaps: false
+      }
+    ]
+  };
+
+
+  const signalChartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    scales: {
+      y: {
+        min: 0,
+        max: 100,
+        ticks: {
+          color: 'rgba(255, 255, 255, 0.55)',
+          font: { size: 10 },
+          stepSize: 25,           // ticks at 0, 25, 50, 75, 100
+          callback: (v) => `${v}%`
+        },
+        grid: {
+          color: (ctx) =>
+            ctx.tick.value === 50
+              ? 'rgba(255, 255, 255, 0.18)'  // mid-line slightly brighter
+              : ctx.tick.value % 25 === 0
+              ? 'rgba(255, 255, 255, 0.10)'
+              : 'rgba(255, 255, 255, 0.05)',
+          lineWidth: (ctx) => ctx.tick.value === 50 ? 1.5 : 1
+        }
+      },
+      x: { display: false }
+    },
+    plugins: {
+      legend: {
+        display: true,
+        position: 'top',
+        align: 'end',
+        labels: {
+          color: 'rgba(255, 255, 255, 0.7)',
+          font: { size: 10 },
+          boxWidth: 12,
+          padding: 8
+        }
+      },
+      tooltip: {
+        mode: 'index',
+        intersect: false,
+        callbacks: {
+          label: (ctx) => ` ${ctx.dataset.label}: ${ctx.parsed.y}%`
+        }
+      }
+    }
   };
 
   return (
@@ -790,34 +939,25 @@ function SignalMeter() {
                   <Typography variant="h6" sx={{ fontSize: '1.1rem', minWidth: 'fit-content' }}>
                     {!tunerStatus?.channel || tunerStatus.channel === 'none' ? 'Stopped' : tunerStatus.channel}
                   </Typography>
-                  
+
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
                     <TextField
                       label="CH"
                       variant="outlined"
                       size="small"
                       value={directChannel}
-                      onChange={(e) => setDirectChannel(e.target.value)}
+                      onChange={(e) => setDirectChannel(e.target.value.replace(/\D/g, ''))}
                       onKeyPress={(e) => {
-                        if (e.key === 'Enter') {
-                          tuneToDirectChannel(directChannel);
-                        }
+                        if (e.key === 'Enter') tuneToDirectChannel(directChannel);
                       }}
                       placeholder={region === 'eu' ? '60' : '36'}
                       sx={{
                         width: 60,
-                        '& .MuiOutlinedInput-root': {
-                          paddingLeft: 0,
-                          paddingRight: 0,
-                        },
-                        '& .MuiOutlinedInput-input': {
-                          padding: '6px 4px',
-                          textAlign: 'center',
-                          fontSize: '14px'
-                        }
+                        '& .MuiOutlinedInput-root': { paddingLeft: 0, paddingRight: 0 },
+                        '& .MuiOutlinedInput-input': { padding: '6px 4px', textAlign: 'center', fontSize: '14px' }
                       }}
                       disabled={!selectedDevice}
-                      inputProps={{ maxLength: 2 }}
+                      inputProps={{ maxLength: 2, inputMode: 'numeric', pattern: '[0-9]*' }}
                     />
                     <Button variant="contained" onClick={() => tuneToDirectChannel(directChannel)} disabled={!selectedDevice || !directChannel} size="small" sx={{ minWidth: 'auto', px: 1 }}>
                       <TuneIcon />
@@ -833,33 +973,42 @@ function SignalMeter() {
                     </Button>
                   </Box>
                 </Box>
-                
-                {/* Compact Signal Display */}
+
+                {/* Compact Signal Meters */}
                 {tunerStatus?.lock ? (
-                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
-                    <Box sx={{ flex: '1 1 120px', minWidth: 120 }}>
-                      <Typography variant="body2" sx={{ fontSize: '0.75rem', mb: 0.5 }}>
-                        Signal: {tunerStatus.ss || 0}%
-                        {tunerStatus.ssDb && <span style={{ fontSize: '0.65rem', opacity: 0.8 }}> (~{tunerStatus.ssDb}dBm)</span>}
-                      </Typography>
-                      <LinearProgress variant="determinate" value={tunerStatus.ss || 0} sx={{ height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { backgroundColor: getSignalColor(tunerStatus.ss || 0) } }} />
+                  <>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center', mb: 1.5 }}>
+                      <Box sx={{ flex: '1 1 120px', minWidth: 120 }}>
+                        <Typography variant="body2" sx={{ fontSize: '0.75rem', mb: 0.5 }}>
+                          Signal: {tunerStatus.ss || 0}%
+                          {tunerStatus.ssDb && <span style={{ fontSize: '0.65rem', opacity: 0.8 }}> (~{tunerStatus.ssDb}dBm)</span>}
+                        </Typography>
+                        <LinearProgress variant="determinate" value={tunerStatus.ss || 0} sx={{ height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { backgroundColor: getSignalColor(tunerStatus.ss || 0) } }} />
+                      </Box>
+                      <Box sx={{ flex: '1 1 120px', minWidth: 120 }}>
+                        <Typography variant="body2" sx={{ fontSize: '0.75rem', mb: 0.5 }}>
+                          SNR: {tunerStatus.snq || 0}%
+                          {tunerStatus.snrDb && tunerStatus.snrDb > 0 && <span style={{ fontSize: '0.65rem', opacity: 0.8 }}> (~{tunerStatus.snrDb}dB)</span>}
+                        </Typography>
+                        <LinearProgress variant="determinate" value={tunerStatus.snq || 0} sx={{ height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { backgroundColor: getSignalColor(tunerStatus.snq || 0) } }} />
+                      </Box>
+                      <Box sx={{ flex: '1 1 120px', minWidth: 120 }}>
+                        <Typography variant="body2" sx={{ fontSize: '0.75rem', mb: 0.5 }}>Sym: {tunerStatus.seq || 0}%</Typography>
+                        <LinearProgress variant="determinate" value={tunerStatus.seq || 0} sx={{ height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { backgroundColor: getSignalColor(tunerStatus.seq || 0) } }} />
+                      </Box>
+                      <Box sx={{ flex: '1 1 100px', minWidth: 100, textAlign: 'right' }}>
+                        <Typography variant="body2" sx={{ fontSize: '0.75rem' }}>Rate</Typography>
+                        <Typography variant="body1" sx={{ fontSize: '0.9rem', fontWeight: 500 }}>{formatDataRate(tunerStatus.bps)}</Typography>
+                      </Box>
                     </Box>
-                    <Box sx={{ flex: '1 1 120px', minWidth: 120 }}>
-                      <Typography variant="body2" sx={{ fontSize: '0.75rem', mb: 0.5 }}>
-                        SNR: {tunerStatus.snq || 0}%
-                        {tunerStatus.snrDb && tunerStatus.snrDb > 0 && <span style={{ fontSize: '0.65rem', opacity: 0.8 }}> (~{tunerStatus.snrDb}dB)</span>}
-                      </Typography>
-                      <LinearProgress variant="determinate" value={tunerStatus.snq || 0} sx={{ height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { backgroundColor: getSignalColor(tunerStatus.snq || 0) } }} />
-                    </Box>
-                    <Box sx={{ flex: '1 1 120px', minWidth: 120 }}>
-                      <Typography variant="body2" sx={{ fontSize: '0.75rem', mb: 0.5 }}>Sym: {tunerStatus.seq || 0}%</Typography>
-                      <LinearProgress variant="determinate" value={tunerStatus.seq || 0} sx={{ height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { backgroundColor: getSignalColor(tunerStatus.seq || 0) } }} />
-                    </Box>
-                    <Box sx={{ flex: '1 1 100px', minWidth: 100, textAlign: 'right' }}>
-                      <Typography variant="body2" sx={{ fontSize: '0.75rem' }}>Rate</Typography>
-                      <Typography variant="body1" sx={{ fontSize: '0.9rem', fontWeight: 500 }}>{formatDataRate(tunerStatus.bps)}</Typography>
-                    </Box>
-                  </Box>
+
+                    {/* Signal + SNR History Chart */}
+                    {(
+                      <Box sx={{ height: 180, mt: 0.5 }}>
+                        <Line data={signalChartData} options={signalChartOptions} />
+                      </Box>
+                    )}
+                  </>
                 ) : (
                   <Typography variant="body2" sx={{ textAlign: 'center', py: 1, color: 'text.secondary' }}>
                     No signal detected
@@ -884,9 +1033,7 @@ function SignalMeter() {
                       onChange={(e) => setChannelMap(e.target.value)}
                     >
                       {CHANNEL_MAPS[region].map((map) => (
-                        <MenuItem key={map.value} value={map.value}>
-                          {map.label}
-                        </MenuItem>
+                        <MenuItem key={map.value} value={map.value}>{map.label}</MenuItem>
                       ))}
                     </Select>
                   </FormControl>
@@ -900,9 +1047,7 @@ function SignalMeter() {
                         onChange={(e) => setSelectedTuner(e.target.value)}
                       >
                         {Array.from({ length: deviceInfo.tuners }, (_, i) => (
-                          <MenuItem key={i} value={i}>
-                            Tuner {i}
-                          </MenuItem>
+                          <MenuItem key={i} value={i}>Tuner {i}</MenuItem>
                         ))}
                       </Select>
                     </FormControl>
@@ -919,9 +1064,9 @@ function SignalMeter() {
             <Card>
               <CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}>
                 <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                  <Chip 
-                    label="ATSC 3.0 Channel Detected" 
-                    color="success" 
+                  <Chip
+                    label="ATSC 3.0 Channel Detected"
+                    color="success"
                     variant="outlined"
                     size="small"
                     sx={{ fontWeight: 600 }}
@@ -960,33 +1105,17 @@ function SignalMeter() {
                       {Object.entries(plpInfo).map(([plpId, info]) => (
                         <TableRow key={plpId}>
                           <TableCell>
-                            <Chip 
-                              label={plpId} 
-                              size="small" 
-                              color="primary" 
-                              variant="outlined"
-                              sx={{ height: 20, fontSize: '0.7rem' }}
-                            />
+                            <Chip label={plpId} size="small" color="primary" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />
                           </TableCell>
                           <TableCell>{info.modulation || 'N/A'}</TableCell>
                           <TableCell>{info.coderate || 'N/A'}</TableCell>
                           <TableCell>{info.layer || 'N/A'}</TableCell>
                           <TableCell>{info.timeInterleaving || 'N/A'}</TableCell>
                           <TableCell>
-                            <Chip 
-                              label={info.lls ? 'Yes' : 'No'} 
-                              size="small" 
-                              color={info.lls ? 'success' : 'default'}
-                              sx={{ height: 18, fontSize: '0.65rem' }}
-                            />
+                            <Chip label={info.lls ? 'Yes' : 'No'} size="small" color={info.lls ? 'success' : 'default'} sx={{ height: 18, fontSize: '0.65rem' }} />
                           </TableCell>
                           <TableCell>
-                            <Chip 
-                              label={info.lock ? 'Locked' : 'Unlocked'} 
-                              size="small" 
-                              color={info.lock ? 'success' : 'error'}
-                              sx={{ height: 18, fontSize: '0.65rem' }}
-                            />
+                            <Chip label={info.lock ? 'Locked' : 'Unlocked'} size="small" color={info.lock ? 'success' : 'error'} sx={{ height: 18, fontSize: '0.65rem' }} />
                           </TableCell>
                         </TableRow>
                       ))}
@@ -1012,9 +1141,7 @@ function SignalMeter() {
                       <Typography variant="body2" sx={{ fontSize: '0.75rem', fontWeight: 500 }}>
                         {key.replace(/_/g, ' ').toUpperCase()}:
                       </Typography>
-                      <Typography variant="body2" sx={{ fontSize: '0.75rem' }}>
-                        {value}
-                      </Typography>
+                      <Typography variant="body2" sx={{ fontSize: '0.75rem' }}>{value}</Typography>
                     </Box>
                   ))}
                 </Box>
@@ -1047,13 +1174,7 @@ function SignalMeter() {
                         <TableRow key={index}>
                           <TableCell>{program.programNum}</TableCell>
                           <TableCell>
-                            <Chip 
-                              label={program.virtualChannel} 
-                              size="small" 
-                              color="primary" 
-                              variant="outlined"
-                              sx={{ height: 20, fontSize: '0.7rem' }}
-                            />
+                            <Chip label={program.virtualChannel} size="small" color="primary" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />
                           </TableCell>
                           <TableCell>{program.callsign}</TableCell>
                           <TableCell>
@@ -1135,7 +1256,6 @@ function SignalMeter() {
           <ListItemText>Copy Stream URL</ListItemText>
         </MenuItem>
       </Menu>
-
     </Box>
   );
 }
