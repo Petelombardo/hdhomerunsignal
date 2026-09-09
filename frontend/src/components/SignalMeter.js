@@ -36,7 +36,8 @@ import {
   TableHead,
   TableRow,
   ToggleButton,
-  ToggleButtonGroup
+  ToggleButtonGroup,
+  Tooltip
 } from '@mui/material';
 import {
   Refresh as RefreshIcon,
@@ -181,6 +182,86 @@ function channelToFrequency(channel, region = 'us') {
   return null;
 }
 
+function getSignalColor(value) {
+  if (value >= 80) return '#4CAF50';
+  if (value >= 60) return '#FF9800';
+  return '#F44336';
+}
+
+// Fold one status reading into a metric's session stats. Each metric latches its
+// own baseline on its first non-zero reading: the device reports lock=none with
+// 0/0/0 while it is still acquiring, and the three values do not come up together,
+// so a shared baseline pins whichever metric arrives last at 0.
+function trackMetric(prev, raw) {
+  const value = raw || 0;
+  if (!prev) return { initial: value > 0 ? value : null, max: value };
+  const initial = prev.initial === null && value > 0 ? value : prev.initial;
+  if (initial === prev.initial && value <= prev.max) return prev;
+  return { initial, max: Math.max(prev.max, value) };
+}
+
+// Signal bar with optional session markers: a dimmed high-water fill behind the
+// live bar, and a caret under the track showing the reading when we first locked
+// this channel. Together they show at a glance whether an antenna nudge helped.
+function SignalBar({ value, stats }) {
+  const current = value || 0;
+  const peak = stats ? Math.max(stats.max, current) : null;
+  const initial = stats && stats.initial !== null ? stats.initial : null;
+  const tip = stats
+    ? `Now ${current}% \u00b7 Start ${initial === null ? '\u2014' : initial + '%'} \u00b7 Peak ${peak}%`
+    : '';
+
+  return (
+    <Tooltip title={tip} placement="top" arrow enterDelay={200} disableInteractive>
+    <Box>
+      <Box sx={{ position: 'relative', height: 8 }}>
+        <Box sx={{ position: 'absolute', inset: 0, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+        {peak !== null && (
+          <Box sx={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: `${peak}%`,
+            borderRadius: 4,
+            backgroundColor: getSignalColor(peak),
+            opacity: 0.3
+          }} />
+        )}
+        <LinearProgress
+          variant="determinate"
+          value={current}
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            height: 8,
+            borderRadius: 4,
+            backgroundColor: 'transparent',
+            '& .MuiLinearProgress-bar': { backgroundColor: getSignalColor(current) }
+          }}
+        />
+      </Box>
+      <Box sx={{ position: 'relative', height: 9 }}>
+        {initial !== null && (
+          <Box sx={{
+            position: 'absolute',
+            left: `${initial}%`,
+            transform: 'translateX(-50%)',
+            fontSize: '0.5rem',
+            lineHeight: 1,
+            color: 'text.secondary',
+            opacity: 0.65,
+            userSelect: 'none'
+          }}>
+            &#9650;
+          </Box>
+        )}
+      </Box>
+    </Box>
+    </Tooltip>
+  );
+}
+
 // Get channel range for region
 function getChannelRange(region) {
   return region === 'eu'
@@ -216,6 +297,9 @@ function SignalMeter() {
   const [antennaMode, setAntennaMode] = useState(false);
   const [allTunersData, setAllTunersData] = useState([]);
   const [contextMenu, setContextMenu] = useState(null); // { mouseX, mouseY, program }
+  // Per-channel session stats: first locked reading and high-water mark for
+  // ss/snq/seq. Reset whenever the tuned channel (or device/tuner) changes.
+  const [signalStats, setSignalStats] = useState(null);
 
   // Refs to track current device/tuner/mode for reconnection
   const selectedDeviceRef = React.useRef(selectedDevice);
@@ -435,6 +519,31 @@ function SignalMeter() {
     // Note: monitoring will restart via the monitoring useEffect, and
     // the auto-fetch useEffect will repopulate data for the new tuner
   }, [selectedTuner]);
+
+  // Track start/peak signal values for the currently tuned channel
+  useEffect(() => {
+    const channel = tunerStatus?.channel;
+    if (!channel || channel === 'none') {
+      setSignalStats(null);
+      return;
+    }
+    // Hold onto the stats through a momentary loss of lock - dropping out while
+    // the antenna swings shouldn't wipe the reference points.
+    if (!tunerStatus.lock) return;
+
+    const key = `${selectedDevice}|${selectedTuner}|${channel}`;
+
+    setSignalStats((prev) => {
+      const base = prev && prev.key === key ? prev : null;
+      const ss = trackMetric(base?.ss, tunerStatus.ss);
+      const snq = trackMetric(base?.snq, tunerStatus.snq);
+      const seq = trackMetric(base?.seq, tunerStatus.seq);
+      // trackMetric hands back the same object when nothing moved, so this keeps
+      // the idle case from re-rendering three progress bars every status tick.
+      if (base && ss === base.ss && snq === base.snq && seq === base.seq) return base;
+      return { key, ss, snq, seq };
+    });
+  }, [tunerStatus, selectedDevice, selectedTuner]);
 
   // Handle antenna mode switching
   useEffect(() => {
@@ -663,12 +772,6 @@ function SignalMeter() {
     }
   };
 
-  const getSignalColor = (value) => {
-    if (value >= 80) return '#4CAF50';
-    if (value >= 60) return '#FF9800';
-    return '#F44336';
-  };
-
   const formatDataRate = (bps) => {
     if (!bps) return '0.000 Mbps';
     return (bps / 1000000).toFixed(3) + ' Mbps';
@@ -835,32 +938,37 @@ function SignalMeter() {
                 </Box>
                 
                 {/* Compact Signal Display */}
-                {tunerStatus?.lock ? (
+                {tunerStatus?.lock ? (() => {
+                  // Only show start/peak markers once the stats belong to the channel on screen
+                  const statsKey = `${selectedDevice}|${selectedTuner}|${tunerStatus.channel}`;
+                  const stats = signalStats?.key === statsKey ? signalStats : null;
+                  return (
                   <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
                     <Box sx={{ flex: '1 1 120px', minWidth: 120 }}>
                       <Typography variant="body2" sx={{ fontSize: '0.75rem', mb: 0.5 }}>
                         Signal: {tunerStatus.ss || 0}%
                         {tunerStatus.ssDb && <span style={{ fontSize: '0.65rem', opacity: 0.8 }}> (~{tunerStatus.ssDb}dBm)</span>}
                       </Typography>
-                      <LinearProgress variant="determinate" value={tunerStatus.ss || 0} sx={{ height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { backgroundColor: getSignalColor(tunerStatus.ss || 0) } }} />
+                      <SignalBar value={tunerStatus.ss} stats={stats?.ss} />
                     </Box>
                     <Box sx={{ flex: '1 1 120px', minWidth: 120 }}>
                       <Typography variant="body2" sx={{ fontSize: '0.75rem', mb: 0.5 }}>
                         SNR: {tunerStatus.snq || 0}%
                         {tunerStatus.snrDb && tunerStatus.snrDb > 0 && <span style={{ fontSize: '0.65rem', opacity: 0.8 }}> (~{tunerStatus.snrDb}dB)</span>}
                       </Typography>
-                      <LinearProgress variant="determinate" value={tunerStatus.snq || 0} sx={{ height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { backgroundColor: getSignalColor(tunerStatus.snq || 0) } }} />
+                      <SignalBar value={tunerStatus.snq} stats={stats?.snq} />
                     </Box>
                     <Box sx={{ flex: '1 1 120px', minWidth: 120 }}>
                       <Typography variant="body2" sx={{ fontSize: '0.75rem', mb: 0.5 }}>Sym: {tunerStatus.seq || 0}%</Typography>
-                      <LinearProgress variant="determinate" value={tunerStatus.seq || 0} sx={{ height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.1)', '& .MuiLinearProgress-bar': { backgroundColor: getSignalColor(tunerStatus.seq || 0) } }} />
+                      <SignalBar value={tunerStatus.seq} stats={stats?.seq} />
                     </Box>
                     <Box sx={{ flex: '1 1 100px', minWidth: 100, textAlign: 'right' }}>
                       <Typography variant="body2" sx={{ fontSize: '0.75rem' }}>Rate</Typography>
                       <Typography variant="body1" sx={{ fontSize: '0.9rem', fontWeight: 500 }}>{formatDataRate(tunerStatus.bps)}</Typography>
                     </Box>
                   </Box>
-                ) : (
+                  );
+                })() : (
                   <Typography variant="body2" sx={{ textAlign: 'center', py: 1, color: 'text.secondary' }}>
                     No signal detected
                   </Typography>
